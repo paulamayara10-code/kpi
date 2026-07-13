@@ -179,6 +179,27 @@ def client_key(value: object) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def product_key(value: object) -> str:
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return ""
+    if isinstance(value, (int, np.integer)):
+        text = str(int(value))
+    elif isinstance(value, (float, np.floating)) and float(value).is_integer():
+        text = str(int(value))
+    else:
+        text = str(value).strip()
+    return re.sub(r"[^A-Z0-9]", "", norm(text))
+
+
+def product_base_key(value: object) -> str:
+    key = product_key(value)
+    # Sufixos usados para revenda/teste não alteram o item comercial de referência.
+    for suffix in ("RV1", "RV2", "RV", "TC", "AT"):
+        if key.endswith(suffix) and len(key) > len(suffix) + 2:
+            return key[:-len(suffix)]
+    return key
+
+
 def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     seen: dict[str, int] = {}
@@ -524,6 +545,158 @@ def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
                 df[c] = df[c].fillna("Não informado").astype(str).str.strip()
 
     return {"faturamento": fat, "metas": metas, "metas_gerentes": metas_g, "usuarios": users, "sheet_states": states}
+
+
+@st.cache_data(show_spinner=False)
+def load_price_table(file_bytes: bytes) -> dict[str, object]:
+    states = workbook_sheet_states(file_bytes)
+    if "Tabela_UF" not in states:
+        raise ValueError("A tabela de preços precisa conter a aba Tabela_UF.")
+    table = read_excel_sheet(file_bytes, "Tabela_UF")
+    product_col = require_col(table, ["Produto", "PRODUTO", "Código", "CODIGO"], "Tabela_UF")
+    type_col = require_col(table, ["TIPO_PRECO", "TIPO PRECO"], "Tabela_UF")
+    table = table[table[type_col].astype(str).map(norm) == "VENDA DIRETA"].copy()
+    table["_PRODUCT_KEY"] = table[product_col].map(product_key)
+    table["_PRODUCT_BASE"] = table[product_col].map(product_base_key)
+    description_col = optional_col(table, ["Descrição", "DESCRICAO", "DESCRIÇÃO"])
+    if description_col:
+        table["_PRICE_DESCRIPTION"] = table[description_col].fillna("").astype(str).str.strip()
+    else:
+        table["_PRICE_DESCRIPTION"] = ""
+    update_col = optional_col(table, ["ATUALIZADO EM", "ATUALIZADO EM ", "DATA ATUALIZAÇÃO"] )
+    table["_UPDATED"] = to_datetime_mixed(table[update_col]) if update_col else pd.NaT
+
+    preferred = ["SP", "Consumidor Final", "4%", "RJ", "MG", "PR", "SC", "RS", "ES", "BA", "PE", "CE", "PA", "AM", "MT", "GO", "DF", "AC", "AL", "MA", "PB", "MS", "PI", "SE", "RN", "RR", "RO", "TO", "AP"]
+    reference_cols = [c for c in preferred if c in table.columns]
+    for col in reference_cols:
+        table[col] = to_number(table[col])
+    table = table[table["_PRODUCT_KEY"] != ""].sort_values("_UPDATED").drop_duplicates("_PRODUCT_KEY", keep="last")
+    return {"table": table, "references": reference_cols, "sheet_states": states}
+
+
+def _fallback_stock_line(row: pd.Series) -> str:
+    text = " ".join(norm(row.get(c, "")) for c in ["Linha", "Descrição", "Descrição_Estoque", "Grupo", "Grupo_Estoque"])
+    if "MICROTECH" in text or "MICRO TECH" in text:
+        return "MICROTECH"
+    if "ENDOSCOPIA" in text or "GASTROENDOSCOPIA" in text:
+        return "ENDOSCOPIA"
+    if "LOCACAO" in text:
+        return "LOCACAO"
+    return "NAO CLASSIFICADA"
+
+
+def _map_stock_lines(df: pd.DataFrame, line_map: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+    product_col = require_col(df, ["Produto", "PRODUTO", "Código", "CODIGO"], "base de estoque")
+    out = df.copy()
+    out["_PRODUCT_KEY"] = out[product_col].map(product_key)
+    out["_PRODUCT_BASE"] = out[product_col].map(product_base_key)
+    out = out.merge(line_map[["_PRODUCT_BASE", "_LINHA_HIST"]], on="_PRODUCT_BASE", how="left")
+    fallback = out.apply(_fallback_stock_line, axis=1)
+    out["_LINHA_ESTOQUE"] = out["_LINHA_HIST"].where(out["_LINHA_HIST"].notna(), fallback)
+    out["_MATCH_LINHA"] = np.where(out["_LINHA_HIST"].notna(), "Histórico de faturamento", np.where(fallback != "NAO CLASSIFICADA", "Linha do estoque", "Não classificada"))
+    return out
+
+
+@st.cache_data(show_spinner=False)
+def load_stock_base(file_bytes: bytes, fat: pd.DataFrame) -> dict[str, object]:
+    states = workbook_sheet_states(file_bytes)
+    if "Radar Executivo" not in states:
+        raise ValueError("A base de estoque precisa conter a aba Radar Executivo.")
+    radar = read_excel_sheet(file_bytes, "Radar Executivo")
+    capital = read_excel_sheet(file_bytes, "Capital Parado") if "Capital Parado" in states else pd.DataFrame()
+    armz = read_excel_sheet(file_bytes, "ARMZ") if "ARMZ" in states else pd.DataFrame()
+
+    product_col = optional_col(fat, ["PRODUTO", "ITEM", "CÓDIGO PRODUTO"])
+    if product_col:
+        mapping = fat[[product_col, "_LINHA", "_VALOR"]].copy()
+        mapping["_PRODUCT_BASE"] = mapping[product_col].map(product_base_key)
+        mapping = (mapping[mapping["_PRODUCT_BASE"] != ""]
+                   .groupby(["_PRODUCT_BASE", "_LINHA"], as_index=False)["_VALOR"].sum()
+                   .sort_values("_VALOR")
+                   .drop_duplicates("_PRODUCT_BASE", keep="last")
+                   .rename(columns={"_LINHA": "_LINHA_HIST"}))
+    else:
+        mapping = pd.DataFrame(columns=["_PRODUCT_BASE", "_LINHA_HIST"])
+
+    radar = _map_stock_lines(radar, mapping)
+    capital = _map_stock_lines(capital, mapping) if not capital.empty else capital
+    armz = _map_stock_lines(armz, mapping) if not armz.empty else armz
+
+    numeric_cols = [
+        "Estoque_Disponível", "Pedido_Aberto_Qtd", "Estoque_Projetado", "Valor_Estoque", "Qtd_30d", "Qtd_180d",
+        "Forecast_30d", "Estoque_Segurança", "Cobertura_Dias", "Cobertura_Meses", "Cobertura_Projetada_Dias",
+        "Excesso_Estoque", "Excesso_R$", "Comprar_Qtd", "Comprar_R$", "Comprar_Líquido_Qtd", "Comprar_Líquido_R$",
+        "Score_Oportunidade", "Estoque_Total", "Dias_Sem_Giro", "Valor_ARMZ", "Estoque_ARMZ", "Disponível_ARMZ"
+    ]
+    for df in [radar, capital, armz]:
+        if df.empty:
+            continue
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = to_number(df[col]).replace([np.inf, -np.inf], np.nan)
+        for col in ["Status", "Ação", "Classe ABC Receita", "Descrição", "Descrição_Estoque", "Linha", "ARMZ"]:
+            if col in df.columns:
+                df[col] = df[col].fillna("Não informado").astype(str).str.strip()
+    return {"radar": radar, "capital": capital, "armz": armz, "sheet_states": states}
+
+
+def build_price_analysis(fat_scope: pd.DataFrame, price_table: pd.DataFrame, reference: str, embedded_margin: float) -> pd.DataFrame:
+    if fat_scope.empty or price_table.empty or reference not in price_table.columns:
+        return pd.DataFrame()
+    product_col = optional_col(fat_scope, ["PRODUTO", "ITEM", "CÓDIGO PRODUTO"] )
+    if product_col is None:
+        return pd.DataFrame()
+    direct = fat_scope.copy()
+    rental_mask = direct["_LINHA"].eq("LOCACAO")
+    for col in ["NOVA", "SEGMENTO", "CATEGORIA"]:
+        if col in direct.columns:
+            rental_mask = rental_mask | direct[col].astype(str).map(norm).str.contains("LOCACAO")
+    direct = direct[~rental_mask].copy()
+    if direct.empty:
+        return direct
+
+    qty_col = optional_col(direct, ["QUANTIDADE", "QTD", "QTDE", "QTD FATURADA", "QUANTIDADE FATURADA"])
+    unit_col = optional_col(direct, ["PREÇO UNITÁRIO", "PRECO UNITARIO", "VALOR UNITÁRIO", "VALOR UNITARIO"])
+    direct["_QTD_VENDA"] = to_number(direct[qty_col]) if qty_col else 0.0
+    direct["_PRECO_REAL_UNIT"] = to_number(direct[unit_col]) if unit_col else 0.0
+    infer_mask = direct["_QTD_VENDA"] <= 0
+    direct.loc[infer_mask & (direct["_PRECO_REAL_UNIT"] > 0), "_QTD_VENDA"] = (
+        direct.loc[infer_mask & (direct["_PRECO_REAL_UNIT"] > 0), "_VALOR"] /
+        direct.loc[infer_mask & (direct["_PRECO_REAL_UNIT"] > 0), "_PRECO_REAL_UNIT"]
+    )
+    direct.loc[direct["_QTD_VENDA"] <= 0, "_QTD_VENDA"] = 1.0
+    direct.loc[direct["_PRECO_REAL_UNIT"] <= 0, "_PRECO_REAL_UNIT"] = (
+        direct.loc[direct["_PRECO_REAL_UNIT"] <= 0, "_VALOR"] / direct.loc[direct["_PRECO_REAL_UNIT"] <= 0, "_QTD_VENDA"]
+    )
+    direct["_PRODUCT_KEY"] = direct[product_col].map(product_key)
+    direct["_PRODUCT_BASE"] = direct[product_col].map(product_base_key)
+
+    p = price_table[["_PRODUCT_KEY", "_PRODUCT_BASE", "_PRICE_DESCRIPTION", reference]].copy()
+    exact_price = p.set_index("_PRODUCT_KEY")[reference].to_dict()
+    exact_desc = p.set_index("_PRODUCT_KEY")["_PRICE_DESCRIPTION"].to_dict()
+    base_counts = p.groupby("_PRODUCT_BASE")["_PRODUCT_KEY"].nunique()
+    unique_bases = set(base_counts[base_counts == 1].index)
+    pbase = p[p["_PRODUCT_BASE"].isin(unique_bases)].drop_duplicates("_PRODUCT_BASE")
+    base_price = pbase.set_index("_PRODUCT_BASE")[reference].to_dict()
+    base_desc = pbase.set_index("_PRODUCT_BASE")["_PRICE_DESCRIPTION"].to_dict()
+
+    direct["_PRECO_TABELA_UNIT"] = direct["_PRODUCT_KEY"].map(exact_price)
+    direct["_DESC_TABELA"] = direct["_PRODUCT_KEY"].map(exact_desc)
+    direct["_MATCH_PRECO"] = np.where(direct["_PRECO_TABELA_UNIT"].notna(), "Exato", "Não localizado")
+    missing = direct["_PRECO_TABELA_UNIT"].isna()
+    direct.loc[missing, "_PRECO_TABELA_UNIT"] = direct.loc[missing, "_PRODUCT_BASE"].map(base_price)
+    direct.loc[missing, "_DESC_TABELA"] = direct.loc[missing, "_PRODUCT_BASE"].map(base_desc)
+    direct.loc[missing & direct["_PRECO_TABELA_UNIT"].notna(), "_MATCH_PRECO"] = "Código equivalente"
+    direct["_PRECO_TABELA_UNIT"] = pd.to_numeric(direct["_PRECO_TABELA_UNIT"], errors="coerce")
+    direct["_VALOR_TABELA"] = direct["_QTD_VENDA"] * direct["_PRECO_TABELA_UNIT"]
+    direct["_ADERENCIA_PRECO"] = np.where(direct["_VALOR_TABELA"] > 0, direct["_VALOR"] / direct["_VALOR_TABELA"], np.nan)
+    direct["_DESCONTO_TABELA"] = 1 - direct["_ADERENCIA_PRECO"]
+    direct["_CUSTO_ESTIMADO"] = direct["_VALOR_TABELA"] * (1 - embedded_margin)
+    direct["_LUCRO_ESTIMADO"] = direct["_VALOR"] - direct["_CUSTO_ESTIMADO"]
+    direct["_MARGEM_ESTIMADA"] = np.where(direct["_VALOR"] != 0, direct["_LUCRO_ESTIMADO"] / direct["_VALOR"], np.nan)
+    return direct
 
 
 @st.cache_data(show_spinner=False)
@@ -1190,18 +1363,23 @@ with st.sidebar:
         "relatorio_cobranca_gerente.xlsx", "relatorio_cobranca_gerente_2026-07-13.xlsx",
         "inadimplencia.xlsx", "Inadimplencia.xlsx", "base_inadimplencia.xlsx", "inadimplencia.csv"
     ])
+    default_price = first_existing(["Tabela de Precos.xlsx", "Tabela de Precos(2).xlsx", "tabela_precos.xlsx"])
+    default_stock = first_existing(["first_forecast_estoque.xlsx", "first_forecast_estoque_20260713_1409.xlsx", "estoque.xlsx"])
 
-    up_base = up_rev = up_inad = None
+    up_base = up_rev = up_inad = up_price = up_stock = None
     if is_director:
         with st.expander("Fontes de dados", expanded=False):
-            up_base = st.file_uploader("Substituir BASE BI", type=["xlsx", "xlsm"], key="up_base_v9")
-            up_rev = st.file_uploader("Substituir REV2026", type=["xlsx", "xlsm"], key="up_rev_v9")
-            up_inad = st.file_uploader("Base de inadimplência (opcional)", type=["xlsx", "xlsm", "csv"], key="up_inad_v9")
-            st.caption("Na REV2026, somente abas visíveis são processadas.")
+            up_base = st.file_uploader("Substituir BASE BI", type=["xlsx", "xlsm"], key="up_base_v12")
+            up_rev = st.file_uploader("Substituir REV2026", type=["xlsx", "xlsm"], key="up_rev_v12")
+            up_inad = st.file_uploader("Base de inadimplência", type=["xlsx", "xlsm", "csv"], key="up_inad_v12")
+            up_price = st.file_uploader("Tabela de preços", type=["xlsx", "xlsm"], key="up_price_v12")
+            up_stock = st.file_uploader("Base de estoque", type=["xlsx", "xlsm"], key="up_stock_v12")
 
 base_bytes, base_name = source_bytes(up_base, default_base)
 rev_bytes, rev_name = source_bytes(up_rev, default_rev)
 inad_bytes, inad_name = source_bytes(up_inad, default_inad)
+price_bytes, price_name = source_bytes(up_price, default_price)
+stock_bytes, stock_name = source_bytes(up_stock, default_stock)
 
 if not base_bytes or not rev_bytes:
     st.error("Inclua `BASE BI.xlsx` e `rev2026 Base bi.xlsx` no repositório ou carregue os arquivos na barra lateral.")
@@ -1222,6 +1400,10 @@ try:
         inad_meta = None
         if inad_bytes:
             inad, inad_meta = prepare_inadimplencia(inad_bytes, inad_name, fat)
+        price_data = load_price_table(price_bytes) if price_bytes else None
+        price_table = price_data["table"] if price_data else None
+        price_references = price_data["references"] if price_data else []
+        stock_data = load_stock_base(stock_bytes, fat) if stock_bytes else None
 except Exception as exc:
     st.error(f"Não foi possível carregar as bases: {exc}")
     st.stop()
@@ -1244,7 +1426,7 @@ with st.sidebar:
         st.markdown(f"<div class='secure-note'><b>Visão restrita:</b> {line_label(scope_choice)}. Outras linhas e custos compartilhados não são exibidos.</div>", unsafe_allow_html=True)
 
     st.markdown("#### Navegação")
-    pages = ["Dashboard", "Desempenho & metas", "Recebimentos & inadimplência", "Clientes", "Produtos", "Custos diretos"]
+    pages = ["Dashboard", "Desempenho & metas", "Recebimentos & inadimplência", "Clientes", "Produtos", "Preços & rentabilidade", "Estoque", "Custos diretos"]
     if is_director:
         pages.insert(1, "Linhas de negócio")
     page = st.radio("Navegação", pages, label_visibility="collapsed")
@@ -1280,6 +1462,12 @@ commercial_monthly = commercial_performance_monthly(fat, metas_g, start_month, e
 commercial_totals = commercial_performance_totals(commercial_monthly, metas_g, scope_choice, end_month.year)
 lines_table = line_summary(fat, metas_g, receitas, custos, start_month, end_month, inad)
 fat_scope, rec_scope, cost_scope, inad_scope = scoped_data(scope_choice, fat, receitas, custos, inad, start_month, end_month)
+dashboard_price = build_price_analysis(fat_scope, price_table, "SP", .25) if price_table is not None and not price_table.empty else pd.DataFrame()
+dashboard_stock = pd.DataFrame()
+if stock_data is not None and not stock_data["radar"].empty:
+    dashboard_stock = stock_data["radar"].copy()
+    if scope_choice != "CONSOLIDADO":
+        dashboard_stock = dashboard_stock[dashboard_stock["_LINHA_ESTOQUE"] == scope_choice]
 
 
 # =========================================================
@@ -1391,6 +1579,20 @@ if page == "Dashboard":
         hide_value_axis(perf_fig, "y")
         st.plotly_chart(plot_layout(perf_fig, 410), width="stretch", config={"displayModeBar": False})
 
+        if not dashboard_price.empty or not dashboard_stock.empty:
+            section_header("Preço e estoque", "Indicadores complementares da operação", "Referência SP")
+            matched_dash = dashboard_price[dashboard_price["_PRECO_TABELA_UNIT"].notna() & (dashboard_price["_PRECO_TABELA_UNIT"] > 0)] if not dashboard_price.empty else pd.DataFrame()
+            dash_sales = float(matched_dash["_VALOR"].sum()) if not matched_dash.empty else 0
+            dash_table = float(matched_dash["_VALOR_TABELA"].sum()) if not matched_dash.empty else 0
+            dash_profit = float(matched_dash["_LUCRO_ESTIMADO"].sum()) if not matched_dash.empty else 0
+            stock_value_dash = float(dashboard_stock.get("Valor_Estoque", pd.Series(dtype=float)).sum()) if not dashboard_stock.empty else 0
+            stock_buy_dash = float(dashboard_stock.get("Comprar_Líquido_R$", pd.Series(dtype=float)).sum()) if not dashboard_stock.empty else 0
+            q1, q2, q3, q4 = st.columns(4)
+            with q1: card("Aderência ao preço", pct(safe_div(dash_sales, dash_table)) if dash_table else "Sem análise", "Venda direta comparada à tabela SP", BLUE if safe_div(dash_sales, dash_table) >= .95 else RED)
+            with q2: card("Margem estimada de venda", pct(safe_div(dash_profit, dash_sales)) if dash_sales else "Sem análise", "Margem de tabela assumida em 25%", NAVY)
+            with q3: card("Valor em estoque", brl(stock_value_dash) if not dashboard_stock.empty else "Base não carregada", "Posição atual da base de estoque", BLUE)
+            with q4: card("Necessidade de compra", brl(stock_buy_dash) if not dashboard_stock.empty else "Base não carregada", "Compra líquida sugerida", RED if stock_buy_dash > 0 else BLUE)
+
         insights = []
         neg_months = company_monthly[company_monthly["Resultado Operacional de Caixa"] < 0]
         if not neg_months.empty:
@@ -1473,6 +1675,20 @@ if page == "Dashboard":
         line_perf_fig.update_layout(title=f"Faturamento x meta · {scope_text}")
         hide_value_axis(line_perf_fig, "y")
         st.plotly_chart(plot_layout(line_perf_fig, 390), width="stretch", config={"displayModeBar": False})
+
+        if not dashboard_price.empty or not dashboard_stock.empty:
+            section_header("Preço e estoque", "Indicadores complementares da linha", "Referência SP")
+            matched_dash = dashboard_price[dashboard_price["_PRECO_TABELA_UNIT"].notna() & (dashboard_price["_PRECO_TABELA_UNIT"] > 0)] if not dashboard_price.empty else pd.DataFrame()
+            dash_sales = float(matched_dash["_VALOR"].sum()) if not matched_dash.empty else 0
+            dash_table = float(matched_dash["_VALOR_TABELA"].sum()) if not matched_dash.empty else 0
+            dash_profit = float(matched_dash["_LUCRO_ESTIMADO"].sum()) if not matched_dash.empty else 0
+            stock_value_dash = float(dashboard_stock.get("Valor_Estoque", pd.Series(dtype=float)).sum()) if not dashboard_stock.empty else 0
+            stock_buy_dash = float(dashboard_stock.get("Comprar_Líquido_R$", pd.Series(dtype=float)).sum()) if not dashboard_stock.empty else 0
+            q1, q2, q3, q4 = st.columns(4)
+            with q1: card("Aderência ao preço", pct(safe_div(dash_sales, dash_table)) if dash_table else "Sem venda direta", "Venda direta comparada à tabela SP", BLUE if safe_div(dash_sales, dash_table) >= .95 else RED)
+            with q2: card("Margem estimada de venda", pct(safe_div(dash_profit, dash_sales)) if dash_sales else "Sem venda direta", "Margem de tabela assumida em 25%", NAVY)
+            with q3: card("Valor em estoque", brl(stock_value_dash) if not dashboard_stock.empty else "Sem itens classificados", "Produtos associados à linha", BLUE)
+            with q4: card("Necessidade de compra", brl(stock_buy_dash) if not dashboard_stock.empty else "Sem itens classificados", "Compra líquida sugerida", RED if stock_buy_dash > 0 else BLUE)
 
         section_header("Clientes e custos que formam o resultado", "Abertura restrita à linha selecionada")
         c1, c2 = st.columns(2)
@@ -1984,6 +2200,220 @@ elif page == "Produtos":
                     file_name=f"produtos_{scope_choice}_{start_month}_{end_month}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
+
+# =========================================================
+# PREÇOS E RENTABILIDADE ESTIMADA
+# =========================================================
+elif page == "Preços & rentabilidade":
+    section_header("Preços e rentabilidade estimada", "Venda direta comparada à tabela", scope_text)
+    if price_table is None or price_table.empty:
+        st.info("Inclua a tabela de preços para habilitar esta análise.")
+    elif not price_references:
+        st.info("A tabela não possui colunas de preço reconhecidas.")
+    else:
+        default_ref = price_references.index("SP") if "SP" in price_references else 0
+        f1, f2, f3 = st.columns([1, .8, 1.4])
+        price_reference = f1.selectbox("Preço de referência", price_references, index=default_ref, key="price_reference")
+        embedded_margin_pct = f2.number_input("Margem embutida (%)", min_value=0.0, max_value=90.0, value=25.0, step=0.5, key="embedded_margin")
+        product_search = f3.text_input("Buscar produto", placeholder="Código ou descrição", key="price_product_search")
+        analysis = build_price_analysis(fat_scope, price_table, price_reference, embedded_margin_pct / 100)
+        if product_search and not analysis.empty:
+            product_col = optional_col(analysis, ["PRODUTO", "ITEM", "CÓDIGO PRODUTO"])
+            desc_col = optional_col(analysis, ["DESCRIÇÃO", "DESCRICAO"])
+            mask = analysis[product_col].astype(str).str.contains(product_search, case=False, na=False) if product_col else False
+            if desc_col:
+                mask = mask | analysis[desc_col].astype(str).str.contains(product_search, case=False, na=False)
+            analysis = analysis[mask]
+
+        if analysis.empty:
+            st.info("Não há vendas diretas no período e escopo selecionados.")
+        else:
+            matched = analysis[analysis["_PRECO_TABELA_UNIT"].notna() & (analysis["_PRECO_TABELA_UNIT"] > 0)].copy()
+            total_sales = float(analysis["_VALOR"].sum())
+            matched_sales = float(matched["_VALOR"].sum())
+            table_value = float(matched["_VALOR_TABELA"].sum())
+            estimated_profit = float(matched["_LUCRO_ESTIMADO"].sum())
+            adherence = safe_div(matched_sales, table_value)
+            estimated_margin = safe_div(estimated_profit, matched_sales)
+            coverage = safe_div(matched_sales, total_sales)
+
+            k1, k2, k3, k4 = st.columns(4)
+            with k1: card("Vendas analisadas", brl(matched_sales), f"{pct(coverage)} das vendas diretas", BLUE)
+            with k2: card("Valor pela tabela", brl(table_value), f"Referência {price_reference}", NAVY)
+            with k3: card("Aderência ao preço", pct(adherence), "Realizado ÷ valor de tabela", BLUE if adherence >= .95 else RED)
+            with k4: card("Margem estimada", pct(estimated_margin), "Após custo estimado pela margem da tabela", BLUE if estimated_margin >= .15 else RED)
+            k5, k6, k7, k8 = st.columns(4)
+            with k5: card("Lucro bruto estimado", brl(estimated_profit), "Estimativa comercial, antes de despesas adicionais", NAVY)
+            with k6: card("Desconto médio", pct(1 - adherence), "Diferença média frente à tabela", RED if adherence < 1 else BLUE)
+            with k7: card("Itens com preço", f"{matched['_PRODUCT_BASE'].nunique():,}".replace(",", "."), "Produtos com correspondência na tabela", CYAN)
+            with k8: card("Vendas sem preço", brl(total_sales - matched_sales), "Itens não localizados na tabela", RED if coverage < .9 else BLUE)
+
+            c1, c2 = st.columns([1.2, 1])
+            with c1:
+                monthly_price = matched.groupby("_MES", as_index=False).agg(Realizado=("_VALOR", "sum"), Tabela=("_VALOR_TABELA", "sum"))
+                monthly_price["Mês"] = monthly_price["_MES"].map(month_label)
+                fig = go.Figure()
+                fig.add_bar(x=monthly_price["Mês"], y=monthly_price["Realizado"], name="Vendido", marker_color=BLUE, text=monthly_price["Realizado"].map(compact_money), textposition="outside", cliponaxis=False)
+                fig.add_scatter(x=monthly_price["Mês"], y=monthly_price["Tabela"], name="Preço de tabela", mode="lines+markers", line=dict(color=NAVY, width=3, dash="dot"), marker=dict(size=7))
+                add_point_labels(fig, monthly_price["Mês"], monthly_price["Tabela"], monthly_price["Tabela"].map(compact_money), color=NAVY)
+                fig.update_layout(title="Vendido x valor teórico de tabela")
+                hide_value_axis(fig, "y")
+                st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+            with c2:
+                product_col = optional_col(matched, ["PRODUTO", "ITEM", "CÓDIGO PRODUTO"]) or "_PRODUCT_BASE"
+                desc_col = optional_col(matched, ["DESCRIÇÃO", "DESCRICAO"])
+                agg = matched.groupby(product_col, as_index=False).agg(Vendido=("_VALOR", "sum"), Tabela=("_VALOR_TABELA", "sum"), Lucro=("_LUCRO_ESTIMADO", "sum"))
+                agg["Desconto"] = 1 - np.where(agg["Tabela"] != 0, agg["Vendido"] / agg["Tabela"], np.nan)
+                top_discount = agg[agg["Desconto"].notna()].sort_values("Desconto", ascending=False).head(12).sort_values("Desconto")
+                top_discount["Produto"] = top_discount[product_col].map(lambda x: short_label(x, 30))
+                fig = px.bar(top_discount, x="Desconto", y="Produto", orientation="h", title="Maiores descontos frente à tabela")
+                fig.update_traces(marker_color=RED, text=top_discount["Desconto"].map(pct), textposition="outside", cliponaxis=False)
+                fig.update_xaxes(tickformat=".0%")
+                hide_value_axis(fig, "x")
+                st.plotly_chart(plot_layout(fig, 430, False), width="stretch", config={"displayModeBar": False})
+
+            product_col = optional_col(matched, ["PRODUTO", "ITEM", "CÓDIGO PRODUTO"]) or "_PRODUCT_BASE"
+            desc_col = optional_col(matched, ["DESCRIÇÃO", "DESCRICAO"])
+            group_cols = [product_col] + ([desc_col] if desc_col else [])
+            detail = matched.groupby(group_cols, as_index=False).agg(
+                Quantidade=("_QTD_VENDA", "sum"),
+                Vendido=("_VALOR", "sum"),
+                Valor_Tabela=("_VALOR_TABELA", "sum"),
+                Custo_Estimado=("_CUSTO_ESTIMADO", "sum"),
+                Lucro_Estimado=("_LUCRO_ESTIMADO", "sum"),
+            )
+            detail["Aderência"] = np.where(detail["Valor_Tabela"] != 0, detail["Vendido"] / detail["Valor_Tabela"], np.nan)
+            detail["Margem Estimada"] = np.where(detail["Vendido"] != 0, detail["Lucro_Estimado"] / detail["Vendido"], np.nan)
+            detail["Preço Médio Vendido"] = np.where(detail["Quantidade"] != 0, detail["Vendido"] / detail["Quantidade"], 0)
+            detail["Preço Médio Tabela"] = np.where(detail["Quantidade"] != 0, detail["Valor_Tabela"] / detail["Quantidade"], 0)
+            detail = detail.sort_values("Vendido", ascending=False)
+            view = detail.rename(columns={product_col: "Produto", desc_col: "Descrição"} if desc_col else {product_col: "Produto"}).copy()
+            for col in ["Vendido", "Valor_Tabela", "Custo_Estimado", "Lucro_Estimado", "Preço Médio Vendido", "Preço Médio Tabela"]:
+                view[col] = view[col].map(brl)
+            for col in ["Aderência", "Margem Estimada"]:
+                view[col] = view[col].map(pct)
+            view["Quantidade"] = view["Quantidade"].map(lambda v: f"{v:,.0f}".replace(",", "."))
+            st.dataframe(view.head(250), width="stretch", hide_index=True, height=500)
+            st.download_button("Exportar análise de preços", dataframe_download(detail, "Preço e Rentabilidade"), file_name=f"precos_rentabilidade_{scope_choice}_{start_month}_{end_month}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            st.markdown("<div class='warning-note'><b>Metodologia:</b> somente vendas diretas são consideradas. O custo é estimado a partir da margem embutida informada sobre o preço de tabela. A análise não substitui o CMV contábil e não inclui frete, impostos, comissão, financiamento ou custos específicos da negociação.</div>", unsafe_allow_html=True)
+
+
+# =========================================================
+# ESTOQUE
+# =========================================================
+elif page == "Estoque":
+    section_header("Estoque", "Disponibilidade, cobertura e capital", "Posição atual")
+    if stock_data is None or stock_data["radar"].empty:
+        st.info("Inclua a base de estoque para habilitar esta análise.")
+    else:
+        radar = stock_data["radar"].copy()
+        capital = stock_data["capital"].copy()
+        armz = stock_data["armz"].copy()
+        if scope_choice != "CONSOLIDADO":
+            radar = radar[radar["_LINHA_ESTOQUE"] == scope_choice]
+            if not capital.empty: capital = capital[capital["_LINHA_ESTOQUE"] == scope_choice]
+            if not armz.empty: armz = armz[armz["_LINHA_ESTOQUE"] == scope_choice]
+
+        f1, f2, f3, f4 = st.columns([1.35, 1, 1, .7])
+        stock_search = f1.text_input("Buscar produto", placeholder="Código ou descrição", key="stock_search")
+        status_values = sorted(radar["Status"].dropna().astype(str).unique()) if "Status" in radar else []
+        selected_status = f2.multiselect("Status", status_values, key="stock_status") if status_values else []
+        abc_values = sorted(radar["Classe ABC Receita"].dropna().astype(str).unique()) if "Classe ABC Receita" in radar else []
+        selected_abc = f3.multiselect("Classe ABC", abc_values, key="stock_abc") if abc_values else []
+        top_n = f4.selectbox("Exibir", [10, 15, 20, 30], index=1, key="stock_top")
+        product_col = optional_col(radar, ["Produto", "PRODUTO"]) or "_PRODUCT_KEY"
+        desc_col = optional_col(radar, ["Descrição", "DESCRIÇÃO"])
+        if stock_search:
+            mask = radar[product_col].astype(str).str.contains(stock_search, case=False, na=False)
+            if desc_col: mask = mask | radar[desc_col].astype(str).str.contains(stock_search, case=False, na=False)
+            radar = radar[mask]
+        if selected_status: radar = radar[radar["Status"].astype(str).isin(selected_status)]
+        if selected_abc: radar = radar[radar["Classe ABC Receita"].astype(str).isin(selected_abc)]
+
+        stock_value = float(radar.get("Valor_Estoque", pd.Series(dtype=float)).sum())
+        available_qty = float(radar.get("Estoque_Disponível", pd.Series(dtype=float)).sum())
+        purchase_value = float(radar.get("Comprar_Líquido_R$", pd.Series(dtype=float)).sum())
+        excess_value = float(radar.get("Excesso_R$", pd.Series(dtype=float)).sum())
+        critical_items = int(radar.get("Status", pd.Series(dtype=str)).astype(str).str.contains("Crítico", case=False, na=False).sum())
+        open_orders = float(radar.get("Pedido_Aberto_Qtd", pd.Series(dtype=float)).sum())
+        k1, k2, k3, k4 = st.columns(4)
+        with k1: card("Valor em estoque", brl(stock_value), "Valor contábil da posição filtrada", NAVY)
+        with k2: card("Estoque disponível", f"{available_qty:,.0f}".replace(",", "."), "Quantidade disponível", BLUE)
+        with k3: card("Itens críticos", f"{critical_items:,}".replace(",", "."), "Itens classificados como críticos", RED if critical_items else BLUE)
+        with k4: card("Necessidade de compra", brl(purchase_value), "Compra líquida sugerida", RED if purchase_value > 0 else BLUE)
+        k5, k6, k7, k8 = st.columns(4)
+        with k5: card("Capital em excesso", brl(excess_value), "Estoque acima da necessidade calculada", RED if excess_value > 0 else BLUE)
+        with k6: card("Pedidos em aberto", f"{open_orders:,.0f}".replace(",", "."), "Quantidade prevista para entrada", CYAN)
+        coverage_values = radar.get("Cobertura_Dias", pd.Series(dtype=float)).dropna()
+        median_coverage = float(coverage_values.median()) if not coverage_values.empty else 0
+        with k7: card("Cobertura mediana", f"{median_coverage:,.0f} dias".replace(",", "."), "Mediana entre itens com cálculo disponível", BLUE)
+        mapped_value = float(radar.loc[radar["_LINHA_ESTOQUE"].isin(LINES), "Valor_Estoque"].sum()) if "Valor_Estoque" in radar else 0
+        with k8: card("Estoque classificado", pct(safe_div(mapped_value, stock_value)), "Valor associado a uma linha de negócio", NAVY)
+
+        tab_overview, tab_capital, tab_warehouse = st.tabs(["Visão geral", "Capital parado", "Armazéns"])
+        with tab_overview:
+            c1, c2 = st.columns(2)
+            with c1:
+                status_summary = radar.groupby("Status", as_index=False).agg(Itens=(product_col, "nunique"), Valor=("Valor_Estoque", "sum")).sort_values("Valor", ascending=False) if "Status" in radar else pd.DataFrame()
+                if not status_summary.empty:
+                    status_summary["Status Curto"] = status_summary["Status"].map(lambda x: short_label(x, 24))
+                    fig = px.bar(status_summary, x="Status Curto", y="Valor", title="Valor do estoque por status", custom_data=["Status"])
+                    fig.update_traces(marker_color=BLUE, text=status_summary["Valor"].map(compact_money), textposition="outside", cliponaxis=False, hovertemplate="%{customdata[0]}<br>Valor: R$ %{y:,.2f}<extra></extra>")
+                    hide_value_axis(fig, "y")
+                    st.plotly_chart(plot_layout(fig, 430, False), width="stretch", config={"displayModeBar": False})
+            with c2:
+                needs = radar[radar.get("Comprar_Líquido_R$", 0) > 0].sort_values("Comprar_Líquido_R$", ascending=False).head(top_n).sort_values("Comprar_Líquido_R$").copy()
+                if not needs.empty:
+                    needs["Produto Curto"] = needs[product_col].map(lambda x: short_label(x, 30))
+                    fig = px.bar(needs, x="Comprar_Líquido_R$", y="Produto Curto", orientation="h", title="Maiores necessidades de compra", custom_data=[product_col])
+                    fig.update_traces(marker_color=RED, text=needs["Comprar_Líquido_R$"].map(compact_money), textposition="outside", cliponaxis=False, hovertemplate="%{customdata[0]}<br>Compra sugerida: R$ %{x:,.2f}<extra></extra>")
+                    hide_value_axis(fig, "x")
+                    st.plotly_chart(plot_layout(fig, 430, False), width="stretch", config={"displayModeBar": False})
+            view_cols = [c for c in [product_col, desc_col, "Linha", "Estoque_Disponível", "Pedido_Aberto_Qtd", "Estoque_Projetado", "Valor_Estoque", "Forecast_30d", "Cobertura_Dias", "Excesso_R$", "Comprar_Líquido_Qtd", "Comprar_Líquido_R$", "Status", "Ação", "Classe ABC Receita"] if c and c in radar.columns]
+            stock_view = radar[view_cols].sort_values(["Comprar_Líquido_R$", "Valor_Estoque"] if "Comprar_Líquido_R$" in radar else ["Valor_Estoque"], ascending=False).head(500).copy()
+            for col in ["Valor_Estoque", "Excesso_R$", "Comprar_Líquido_R$"]:
+                if col in stock_view: stock_view[col] = stock_view[col].map(brl)
+            st.dataframe(stock_view, width="stretch", hide_index=True, height=500)
+
+        with tab_capital:
+            if capital.empty:
+                st.info("A base não possui a aba Capital Parado.")
+            else:
+                cap_product = optional_col(capital, ["Produto", "PRODUTO"]) or "_PRODUCT_KEY"
+                cap_desc = optional_col(capital, ["Descrição_Estoque", "Descrição", "DESCRIÇÃO"])
+                capital_value = float(capital.get("Excesso_R$", capital.get("Valor_Estoque", pd.Series(dtype=float))).sum())
+                no_turn = capital.get("Status", pd.Series(dtype=str)).astype(str).str.contains("Sem Giro", case=False, na=False)
+                no_turn_value = float(capital.loc[no_turn, "Valor_Estoque"].sum()) if "Valor_Estoque" in capital else 0
+                c1, c2, c3 = st.columns(3)
+                with c1: card("Capital parado", brl(capital_value), "Excesso financeiro identificado", RED if capital_value else BLUE)
+                with c2: card("Itens sem giro", f"{int(no_turn.sum()):,}".replace(",", "."), "Itens sem consumo identificado", RED if no_turn.any() else BLUE)
+                with c3: card("Valor sem giro", brl(no_turn_value), "Valor dos itens sem movimentação", RED if no_turn_value else BLUE)
+                top_cap = capital.sort_values("Excesso_R$", ascending=False).head(top_n).sort_values("Excesso_R$").copy() if "Excesso_R$" in capital else pd.DataFrame()
+                if not top_cap.empty:
+                    top_cap["Produto Curto"] = top_cap[cap_product].map(lambda x: short_label(x, 34))
+                    fig = px.bar(top_cap, x="Excesso_R$", y="Produto Curto", orientation="h", title="Maiores concentrações de capital parado", custom_data=[cap_product])
+                    fig.update_traces(marker_color=RED, text=top_cap["Excesso_R$"].map(compact_money), textposition="outside", cliponaxis=False, hovertemplate="%{customdata[0]}<br>Excesso: R$ %{x:,.2f}<extra></extra>")
+                    hide_value_axis(fig, "x")
+                    st.plotly_chart(plot_layout(fig, 500, False), width="stretch", config={"displayModeBar": False})
+
+        with tab_warehouse:
+            if armz.empty or "ARMZ" not in armz.columns:
+                st.info("A base não possui abertura por armazém.")
+            else:
+                warehouse = armz.groupby("ARMZ", as_index=False).agg(Disponível=("Disponível_ARMZ", "sum"), Valor=("Valor_ARMZ", "sum"), Produtos=("_PRODUCT_BASE", "nunique")).sort_values("Valor", ascending=False)
+                c1, c2 = st.columns([1.1, 1])
+                with c1:
+                    fig = px.bar(warehouse.head(20).sort_values("Valor"), x="Valor", y="ARMZ", orientation="h", title="Valor por armazém")
+                    fig.update_traces(marker_color=BLUE, text=warehouse.head(20).sort_values("Valor")["Valor"].map(compact_money), textposition="outside", cliponaxis=False)
+                    hide_value_axis(fig, "x")
+                    st.plotly_chart(plot_layout(fig, 480, False), width="stretch", config={"displayModeBar": False})
+                with c2:
+                    wh_view = warehouse.copy()
+                    wh_view["Valor"] = wh_view["Valor"].map(brl)
+                    wh_view["Disponível"] = wh_view["Disponível"].map(lambda v: f"{v:,.0f}".replace(",", "."))
+                    st.dataframe(wh_view, width="stretch", hide_index=True, height=480)
+        st.download_button("Exportar posição de estoque", dataframe_download(radar, "Estoque"), file_name=f"estoque_{scope_choice}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
 
 # =========================================================
 # CUSTOS DIRETOS
