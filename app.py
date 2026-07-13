@@ -2425,22 +2425,43 @@ elif page == "Centro de custos":
                 if col not in by_department:
                     by_department[col] = 0.0
             by_department["Movimentação"] = by_department["Receita"] + by_department["Despesa"]
-            by_department = by_department.sort_values("Movimentação", ascending=False).head(top_n).sort_values("Movimentação")
+            by_department = (
+                by_department.sort_values("Movimentação", ascending=False)
+                .head(top_n)
+                .sort_values("Movimentação")
+            )
+            by_department["Departamento gráfico"] = by_department["Departamento"].map(lambda x: short_label(x, 30))
+            revenue_labels = [compact_money(v) if float(v) > 0 else "" for v in by_department["Receita"]]
+            expense_labels = [compact_money(v) if float(v) > 0 else "" for v in by_department["Despesa"]]
+
             fig = go.Figure()
             fig.add_bar(
-                x=by_department["Receita"], y=by_department["Departamento"], orientation="h",
-                name="Receitas", marker_color=BLUE, text=by_department["Receita"].map(compact_money),
+                x=by_department["Receita"], y=by_department["Departamento gráfico"], orientation="h",
+                name="Receitas", marker_color=BLUE, text=revenue_labels,
                 textposition="outside", cliponaxis=False,
+                customdata=by_department[["Departamento"]],
+                hovertemplate="%{customdata[0]}<br>Receitas: R$ %{x:,.2f}<extra></extra>",
             )
             fig.add_bar(
-                x=-by_department["Despesa"], y=by_department["Departamento"], orientation="h",
-                name="Despesas", marker_color=RED, text=by_department["Despesa"].map(compact_money),
+                x=by_department["Despesa"], y=by_department["Departamento gráfico"], orientation="h",
+                name="Despesas", marker_color=RED, text=expense_labels,
                 textposition="outside", cliponaxis=False,
+                customdata=by_department[["Departamento"]],
+                hovertemplate="%{customdata[0]}<br>Despesas: R$ %{x:,.2f}<extra></extra>",
             )
-            fig.add_vline(x=0, line_color="#AFC4D6", line_width=1.2)
-            fig.update_layout(title="Receitas e despesas por departamento", barmode="relative")
+            fig.update_layout(
+                title="Receitas e despesas por departamento",
+                barmode="group",
+                bargap=.30,
+                bargroupgap=.12,
+            )
             hide_value_axis(fig, "x")
-            st.plotly_chart(plot_layout(fig, max(430, 34 * len(by_department)), True), width="stretch", config={"displayModeBar": False})
+            fig.update_yaxes(categoryorder="array", categoryarray=by_department["Departamento gráfico"].tolist())
+            st.plotly_chart(
+                plot_layout(fig, max(440, 54 * len(by_department)), True),
+                width="stretch",
+                config={"displayModeBar": False},
+            )
 
         p1, p2 = st.columns(2)
         with p1:
