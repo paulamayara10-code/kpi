@@ -1700,6 +1700,150 @@ if page == "Dashboard":
             hide_value_axis(fig, "x")
             st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
 
+    else:
+        t = line_totals
+        overdue = float(inad_scope["_VALOR_VENCIDO"].sum()) if inad_scope is not None and not inad_scope.empty else 0.0
+
+        k1, k2, k3, k4 = st.columns(4)
+        with k1:
+            card("Receitas operacionais", brl(t["Receitas Recebidas"]), "Recebimentos diretos da linha", BLUE)
+        with k2:
+            card("Despesas operacionais", brl(t["Custos Diretos Pagos"]), "Pagamentos diretos da linha", RED)
+        with k3:
+            card(
+                "Resultado direto de caixa", brl(t["Resultado Direto de Caixa"]),
+                "Receitas menos despesas diretas", BLUE if t["Resultado Direto de Caixa"] >= 0 else RED,
+            )
+        with k4:
+            card(
+                "Margem direta de caixa", pct(t["Margem Direta de Caixa"]),
+                "Resultado direto sobre receitas", BLUE if t["Margem Direta de Caixa"] >= 0 else RED,
+            )
+
+        k5, k6, k7, k8 = st.columns(4)
+        with k5:
+            card("Faturamento", brl(commercial_totals["Faturamento"]), "Vendas emitidas no período", NAVY)
+        with k6:
+            card("Atingimento da meta", pct(commercial_totals["Atingimento"]), "Faturamento sobre meta", BLUE)
+        with k7:
+            card("Conversão em caixa", pct(t["Conversão em Caixa"]), "Receita recebida sobre faturamento", TEAL)
+        with k8:
+            card("Inadimplência", brl(overdue) if inad is not None else "Base não carregada", "Saldo vencido da linha", RED if overdue > 0 else BLUE)
+
+        c1, c2 = st.columns([1.18, 1])
+        with c1:
+            fig = go.Figure()
+            fig.add_bar(
+                x=line_monthly["Mês Texto"], y=line_monthly["Receitas Recebidas"],
+                name="Receitas", marker_color=BLUE,
+                text=line_monthly["Receitas Recebidas"].map(compact_money),
+                textposition="outside", cliponaxis=False,
+            )
+            fig.add_bar(
+                x=line_monthly["Mês Texto"], y=line_monthly["Custos Diretos Pagos"],
+                name="Despesas", marker_color=RED,
+                text=line_monthly["Custos Diretos Pagos"].map(compact_money),
+                textposition="inside", insidetextanchor="end", cliponaxis=False,
+                textfont=dict(color=WHITE, size=10),
+            )
+            fig.add_scatter(
+                x=line_monthly["Mês Texto"], y=line_monthly["Resultado Direto de Caixa"],
+                name="Resultado", mode="lines+markers",
+                line=dict(color=NAVY, width=3), marker=dict(size=7),
+            )
+            add_point_labels(
+                fig, line_monthly["Mês Texto"], line_monthly["Resultado Direto de Caixa"],
+                line_monthly["Resultado Direto de Caixa"].map(compact_money), color=NAVY,
+            )
+            fig.update_layout(title="Resultado mensal de caixa", barmode="group")
+            hide_value_axis(fig, "y")
+            st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+
+        with c2:
+            fig = go.Figure()
+            fig.add_bar(
+                x=commercial_monthly["Mês Texto"], y=commercial_monthly["Faturamento"],
+                name="Faturamento", marker_color=BLUE,
+                text=commercial_monthly["Faturamento"].map(compact_money),
+                textposition="outside", cliponaxis=False,
+            )
+            fig.add_scatter(
+                x=commercial_monthly["Mês Texto"], y=commercial_monthly["Meta"],
+                name="Meta", mode="lines+markers",
+                line=dict(color=NAVY, width=3, dash="dot"), marker=dict(size=7),
+            )
+            add_point_labels(
+                fig, commercial_monthly["Mês Texto"], commercial_monthly["Meta"],
+                commercial_monthly["Meta"].map(compact_money), color=NAVY,
+            )
+            fig.update_layout(title="Faturamento x meta")
+            hide_value_axis(fig, "y")
+            st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+
+        section_header("Desempenho comercial", badge=scope_text)
+        s1, s2, s3, s4 = st.columns(4)
+        with s1:
+            card("Meta acumulada", brl(commercial_totals["Meta"]), "Objetivo do período", NAVY)
+        with s2:
+            card(
+                "Desvio da meta", brl(commercial_totals["Desvio"]),
+                "Realizado menos meta", BLUE if commercial_totals["Desvio"] >= 0 else RED,
+            )
+        with s3:
+            card("Projeção anual", brl(commercial_totals["Projeção Anual"]), "Ritmo atual anualizado", BLUE)
+        with s4:
+            card(
+                "Atingimento projetado", pct(commercial_totals["Atingimento Projetado"]),
+                "Projeção sobre meta anual", BLUE if commercial_totals["Atingimento Projetado"] >= 1 else NAVY,
+            )
+
+        section_header("Clientes e despesas", badge=scope_text)
+        c3, c4 = st.columns(2)
+        with c3:
+            client_col = "NOME DO CLIENTE" if "NOME DO CLIENTE" in fat_scope.columns else "CLIENTE"
+            top_clients = (
+                fat_scope.groupby(client_col, as_index=False)["_VALOR"].sum()
+                .sort_values("_VALOR", ascending=False).head(10)
+            )
+            if top_clients.empty:
+                st.info("Não há clientes com faturamento no período selecionado.")
+            else:
+                top_clients["Nome"] = top_clients[client_col].map(lambda x: short_label(x, 38))
+                p = top_clients.sort_values("_VALOR")
+                fig = px.bar(
+                    p, x="_VALOR", y="Nome", orientation="h",
+                    title="Principais clientes", custom_data=[client_col],
+                )
+                fig.update_traces(
+                    marker_color=BLUE, text=p["_VALOR"].map(compact_money),
+                    textposition="outside", cliponaxis=False,
+                    hovertemplate="%{customdata[0]}<br>Faturamento: R$ %{x:,.2f}<extra></extra>",
+                )
+                hide_value_axis(fig, "x")
+                st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
+
+        with c4:
+            top_cost = (
+                cost_scope.groupby("PAI", as_index=False)["_VALOR"].sum()
+                .sort_values("_VALOR", ascending=False).head(10)
+            )
+            if top_cost.empty:
+                st.info("Não há despesas diretas no período selecionado.")
+            else:
+                top_cost["Natureza"] = top_cost["PAI"].map(lambda x: short_label(x, 36))
+                p = top_cost.sort_values("_VALOR")
+                fig = px.bar(
+                    p, x="_VALOR", y="Natureza", orientation="h",
+                    title="Principais despesas", custom_data=["PAI"],
+                )
+                fig.update_traces(
+                    marker_color=RED, text=p["_VALOR"].map(compact_money),
+                    textposition="outside", cliponaxis=False,
+                    hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>",
+                )
+                hide_value_axis(fig, "x")
+                st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
+
 
 # =========================================================
 # DESEMPENHO E METAS
