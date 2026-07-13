@@ -54,7 +54,7 @@ st.markdown(
         display: flex; flex-direction: column; justify-content: space-between;
     }}
     .kpi-label {{ color: {GRAY}; font-size: .73rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; line-height: 1.25; }}
-    .kpi-value {{ color: {NAVY}; font-size: clamp(1.20rem, 1.7vw, 1.65rem); font-weight: 800; margin-top: 8px; line-height: 1.12; overflow-wrap: anywhere; }}
+    .kpi-value {{ color: {NAVY}; font-size: clamp(1.00rem, 1.35vw, 1.35rem); font-weight: 800; margin-top: 8px; line-height: 1.12; white-space: nowrap; letter-spacing: -.02em; }}
     .kpi-note {{ color: {GRAY}; font-size: .73rem; margin-top: 9px; line-height: 1.35; overflow-wrap: anywhere; }}
     .section-title {{ color: {NAVY}; font-size: 1.15rem; font-weight: 800; margin: 8px 0 6px 0; }}
     .insight {{ background: white; border-left: 4px solid {TEAL}; border-radius: 10px; padding: 12px 14px; margin: 7px 0; }}
@@ -167,17 +167,28 @@ def plot_layout(fig: go.Figure, height: int = 390, legend_bottom: bool = True) -
         font=dict(family="Arial", color="#344054", size=12),
         legend=legend,
         title=dict(font=dict(color=NAVY, size=16), x=0.01, xanchor="left", y=0.98),
-        hoverlabel=dict(bgcolor="white"),
+        hoverlabel=dict(bgcolor="white", namelength=-1),
         hovermode="closest",
         separators=",.",
     )
-    fig.update_xaxes(showgrid=False, automargin=True)
-    fig.update_yaxes(gridcolor="#EDF0F4", zeroline=False, automargin=True)
+    # Os nomes dos campos já aparecem no título e na legenda. Retirar os títulos
+    # dos eixos libera espaço e evita sobreposição em telas menores.
+    fig.update_xaxes(title_text="", showgrid=False, automargin=True)
+    fig.update_yaxes(title_text="", gridcolor="#EDF0F4", zeroline=False, automargin=True)
     return fig
 
 
 def apply_brl_axis(fig: go.Figure, axis: str = "y") -> go.Figure:
-    axis_update = dict(tickprefix="R$ ", tickformat="~s", separatethousands=True)
+    # Formato monetário brasileiro completo nos eixos: R$ 1.234.567,89.
+    # O layout usa separators=",.", portanto vírgula é decimal e ponto é milhar.
+    axis_update = dict(
+        tickprefix="R$ ",
+        tickformat=",.2f",
+        separatethousands=True,
+        exponentformat="none",
+        showexponent="none",
+        automargin=True,
+    )
     if axis == "x":
         fig.update_xaxes(**axis_update)
     else:
@@ -589,22 +600,22 @@ st.markdown(
 
 # KPIs principais — quatro cartões por linha para preservar leitura e evitar sobreposição.
 k1, k2, k3, k4 = st.columns(4)
-with k1: card("Faturamento bruto", brl(totals["Faturamento"], True), f"Vendas emitidas · Meta: {brl(totals['Meta'], True)}")
+with k1: card("Faturamento bruto", brl(totals["Faturamento"]), f"Vendas emitidas · Meta: {brl(totals['Meta'])}")
 with k2: card("Atingimento da meta", pct(totals["Atingimento"]), "Faturamento bruto ÷ meta comercial")
-with k3: card("Margem de contribuição", pct(totals["MC %"]), f"Valor: {brl(totals['Margem de Contribuição'], True)}")
-with k4: card("EBITDA gerencial de caixa", brl(totals["EBITDA Gerencial"], True), "Operação antes de IRPJ e CSLL; visão gerencial")
+with k3: card("Margem de contribuição", pct(totals["MC %"]), f"Valor: {brl(totals['Margem de Contribuição'])}")
+with k4: card("EBITDA gerencial de caixa", brl(totals["EBITDA Gerencial"]), "Operação antes de IRPJ e CSLL; visão gerencial")
 
 k5, k6, k7, k8 = st.columns(4)
 with k5: card("Margem EBITDA", pct(totals["Margem EBITDA"]), "EBITDA gerencial ÷ receita operacional recebida")
-with k6: card("Receita operacional recebida", brl(totals["Receita Operacional"], True), "Entradas ligadas à atividade principal")
-with k7: card("Entradas não operacionais", brl(totals["Receita Não Operacional"], True), "Pode incluir capital de giro, empréstimos e outras fontes")
+with k6: card("Receita operacional recebida", brl(totals["Receita Operacional"]), "Entradas ligadas à atividade principal")
+with k7: card("Entradas não operacionais", brl(totals["Receita Não Operacional"]), "Pode incluir capital de giro, empréstimos e outras fontes")
 with k8: card("Qualidade das entradas", pct(totals["Qualidade das Entradas"]), "Receita operacional ÷ entradas classificadas")
 
 k9, k10, k11, k12 = st.columns(4)
-with k9: card("Recebimentos totais", brl(totals["Recebimentos Totais"], True), "Total pago na base de recebimentos")
+with k9: card("Recebimentos totais", brl(totals["Recebimentos Totais"]), "Total pago na base de recebimentos")
 with k10: card("Performance de recebimento", pct(totals["Performance Recebimento"]), "Recebimento realizado ÷ previsto")
-with k11: card("Despesas operacionais", brl(totals["Despesas Operacionais"], True), f"{pct(safe_div(totals['Despesas Operacionais'], totals['Receita Operacional']))} da receita operacional")
-with k12: card("Ponto de equilíbrio", brl(totals["Ponto de Equilíbrio"], True), "Custos fixos ÷ margem de contribuição %")
+with k11: card("Despesas operacionais", brl(totals["Despesas Operacionais"]), f"{pct(safe_div(totals['Despesas Operacionais'], totals['Receita Operacional']))} da receita operacional")
+with k12: card("Ponto de equilíbrio", brl(totals["Ponto de Equilíbrio"]), "Custos fixos ÷ margem de contribuição %")
 
 with st.expander("ℹ️ Como interpretar cada KPI", expanded=False):
     h1, h2 = st.columns(2)
@@ -722,15 +733,14 @@ with tab_result:
         "Custos Fixos", "Margem de Contribuição", "EBITDA Gerencial", "Recebimento Previsto", "Recebimento Realizado"
     ]
     pct_cols_result = ["Atingimento", "Qualidade das Entradas", "Conversão do Faturamento", "MC %", "Margem EBITDA", "Performance Recebimento"]
-    result_config = {c: st.column_config.NumberColumn(format="R$ %.2f") for c in money_cols_result}
-    result_config.update({c: st.column_config.NumberColumn(format="%.1f%%") for c in pct_cols_result})
     result_for_view = result_display.copy()
+    for c in money_cols_result:
+        result_for_view[c] = result_for_view[c].map(brl)
     for c in pct_cols_result:
-        result_for_view[c] = result_for_view[c] * 100
+        result_for_view[c] = result_for_view[c].map(pct)
     st.dataframe(
         result_for_view,
         width="stretch", hide_index=True, height=330,
-        column_config=result_config,
     )
     export_df = result_display.copy()
     st.download_button(
@@ -778,12 +788,12 @@ with tab_com:
     share = safe_div(filtered_revenue, totals["Faturamento"])
 
     m1, m2, m3 = st.columns(3)
-    with m1: card("Faturamento filtrado", brl(filtered_revenue, True), f"{pct(share)} do total")
-    with m2: card("Meta filtrada", brl(meta_filtered, True), "Conforme vendedor ou gerente selecionado")
+    with m1: card("Faturamento filtrado", brl(filtered_revenue), f"{pct(share)} do total")
+    with m2: card("Meta filtrada", brl(meta_filtered), "Conforme vendedor ou gerente selecionado")
     with m3: card("Atingimento", pct(safe_div(filtered_revenue, meta_filtered)), "Faturamento ÷ meta")
     m4, m5 = st.columns(2)
     with m4: card("Clientes ativos", f"{clients:,}".replace(",", "."), f"{invoices:,} notas".replace(",", "."))
-    with m5: card("Ticket médio por NF", brl(ticket, True), "Faturamento ÷ notas fiscais")
+    with m5: card("Ticket médio por NF", brl(ticket), "Faturamento ÷ notas fiscais")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -822,13 +832,15 @@ with tab_com:
         by_seller = com.groupby(seller_col, as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(15)
         st.markdown("**Ranking de vendedores / representantes**")
         seller_view = by_seller.rename(columns={seller_col: "Vendedor / Representante", "_VALOR": "Faturamento"})
-        st.dataframe(seller_view, width="stretch", hide_index=True, height=440, column_config={"Faturamento": st.column_config.NumberColumn(format="R$ %.2f")})
+        seller_view["Faturamento"] = seller_view["Faturamento"].map(brl)
+        st.dataframe(seller_view, width="stretch", hide_index=True, height=440)
     with c6:
         client_col = "NOME DO CLIENTE" if "NOME DO CLIENTE" in com else "CLIENTE"
         by_client = com.groupby(client_col, as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(15)
         st.markdown("**Principais clientes**")
         client_view = by_client.rename(columns={client_col: "Cliente", "_VALOR": "Faturamento"})
-        st.dataframe(client_view, width="stretch", hide_index=True, height=440, column_config={"Faturamento": st.column_config.NumberColumn(format="R$ %.2f")})
+        client_view["Faturamento"] = client_view["Faturamento"].map(brl)
+        st.dataframe(client_view, width="stretch", hide_index=True, height=440)
 
     export_cols = [c for c in ["DT Emissao", "Nota Fiscal", "NOME DO CLIENTE", "GERENTE", seller_col, "SEGMENTO", "NOVA", "LINHA DE PRODUTO", "VALOR BRUTO"] if c in com.columns]
     export_com = com[export_cols].copy() if export_cols else com.copy()
@@ -861,10 +873,10 @@ with tab_cash:
         st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
 
     c3, c4, c5, c6 = st.columns(4)
-    with c3: card("Receita operacional", brl(totals["Receita Operacional"], True), "Entradas vinculadas à atividade principal")
+    with c3: card("Receita operacional", brl(totals["Receita Operacional"]), "Entradas vinculadas à atividade principal")
     with c4: card("Conversão do faturamento", pct(totals["Conversão do Faturamento"]), "Receita operacional recebida ÷ faturamento emitido")
     with c5: card("Qualidade das entradas", pct(totals["Qualidade das Entradas"]), "Parcela operacional das entradas classificadas")
-    with c6: card("Entradas não operacionais", brl(totals["Receita Não Operacional"], True), f"{pct(totals['Dependência Não Operacional'])} das entradas classificadas")
+    with c6: card("Entradas não operacionais", brl(totals["Receita Não Operacional"]), f"{pct(totals['Dependência Não Operacional'])} das entradas classificadas")
 
     st.markdown(
         "<div class='method-note'><b>Leitura correta:</b> capital de giro e empréstimos aumentam o saldo de caixa, "
@@ -938,15 +950,17 @@ with tab_cost:
     ]).merge(cost_totals.rename(columns={"PAI": "Natureza / PAI", "_VALOR": "Valor no período"}), on="Natureza / PAI", how="left")
     class_df["Valor no período"] = class_df["Valor no período"].fillna(0)
     class_df = class_df.sort_values("Valor no período", ascending=False)
+    class_df_editor = class_df.copy()
+    class_df_editor["Valor no período"] = class_df_editor["Valor no período"].map(brl)
     edited = st.data_editor(
-        class_df,
+        class_df_editor,
         width="stretch",
         hide_index=True,
         height=480,
         column_config={
             "Natureza / PAI": st.column_config.TextColumn(disabled=True),
             "Classificação KPI": st.column_config.SelectboxColumn(options=["Variável", "Fixo/Operacional", "Excluir EBITDA"], required=True),
-            "Valor no período": st.column_config.NumberColumn(format="R$ %.2f", disabled=True),
+            "Valor no período": st.column_config.TextColumn(disabled=True),
         },
         key="classification_editor",
     )
@@ -957,9 +971,14 @@ with tab_cost:
     if b2.button("Restaurar padrão", width="stretch"):
         st.session_state["cost_classifications"] = {p: default_classification(p) for p in edited["Natureza / PAI"]}
         st.rerun()
+    export_premissas = class_df[["Natureza / PAI", "Valor no período"]].copy()
+    export_premissas["Classificação KPI"] = export_premissas["Natureza / PAI"].map(
+        dict(zip(edited["Natureza / PAI"], edited["Classificação KPI"]))
+    )
+    export_premissas = export_premissas[["Natureza / PAI", "Classificação KPI", "Valor no período"]]
     b3.download_button(
         "⬇️ Exportar premissas",
-        data=dataframe_download(edited, "Premissas Custos"),
+        data=dataframe_download(export_premissas, "Premissas Custos"),
         file_name="premissas_classificacao_custos.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         width="content",
