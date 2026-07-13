@@ -501,30 +501,34 @@ def line_result_lollipop(df: pd.DataFrame, title: str) -> go.Figure:
 
 
 def line_revenue_cost_dumbbell(df: pd.DataFrame, title: str) -> go.Figure:
-    """Receitas e custos por linha em gráfico dumbbell para comparação direta."""
-    p = df.sort_values("Receitas Recebidas").copy()
+    """Receitas e despesas por linha em barras verticais agrupadas."""
+    p = df.sort_values("Receitas Recebidas", ascending=False).copy()
     fig = go.Figure()
-    for _, row in p.iterrows():
-        fig.add_shape(
-            type="line", x0=float(row["Custos Diretos Pagos"]), x1=float(row["Receitas Recebidas"]),
-            y0=row["Linha"], y1=row["Linha"], line=dict(color="#C6D6E4", width=5), layer="below",
-        )
-    fig.add_trace(go.Scatter(
-        x=p["Receitas Recebidas"], y=p["Linha"], mode="markers+text", name="Receitas",
-        marker=dict(size=17, color=BLUE, line=dict(color=WHITE, width=2)),
-        text=p["Receitas Recebidas"].map(compact_money), textposition="top center",
-        textfont=dict(size=9, color=NAVY), cliponaxis=False,
-        hovertemplate="%{y}<br>Receitas: R$ %{x:,.2f}<extra></extra>",
+    fig.add_trace(go.Bar(
+        x=p["Linha"],
+        y=p["Receitas Recebidas"],
+        name="Receitas",
+        marker=dict(color=BLUE, line=dict(color="rgba(7,27,51,.10)", width=0.8)),
+        text=p["Receitas Recebidas"].map(compact_money),
+        textposition="outside",
+        textfont=dict(size=10, color=NAVY),
+        cliponaxis=False,
+        hovertemplate="%{x}<br>Receitas: R$ %{y:,.2f}<extra></extra>",
     ))
-    fig.add_trace(go.Scatter(
-        x=p["Custos Diretos Pagos"], y=p["Linha"], mode="markers+text", name="Despesas",
-        marker=dict(size=17, color=RED, line=dict(color=WHITE, width=2)),
-        text=p["Custos Diretos Pagos"].map(compact_money), textposition="bottom center",
-        textfont=dict(size=9, color=RED), cliponaxis=False,
-        hovertemplate="%{y}<br>Despesas: R$ %{x:,.2f}<extra></extra>",
+    fig.add_trace(go.Bar(
+        x=p["Linha"],
+        y=p["Custos Diretos Pagos"],
+        name="Despesas",
+        marker=dict(color=RED, line=dict(color="rgba(7,27,51,.10)", width=0.8)),
+        text=p["Custos Diretos Pagos"].map(compact_money),
+        textposition="outside",
+        textfont=dict(size=10, color=RED),
+        cliponaxis=False,
+        hovertemplate="%{x}<br>Despesas: R$ %{y:,.2f}<extra></extra>",
     ))
-    fig.update_layout(title=title)
-    hide_value_axis(fig, "x")
+    fig.update_layout(title=title, barmode="group", bargap=.35, bargroupgap=.14)
+    hide_value_axis(fig, "y")
+    fig.update_xaxes(showgrid=False, ticks="", tickfont=dict(color="#61758A", size=11))
     return fig
 
 
