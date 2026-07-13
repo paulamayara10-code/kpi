@@ -161,7 +161,7 @@ def plot_layout(fig: go.Figure, height: int = 390, legend_bottom: bool = True) -
     )
     fig.update_layout(
         height=height,
-        margin=dict(l=18, r=18, t=70, b=70 if legend_bottom else 30),
+        margin=dict(l=18, r=32, t=88, b=70 if legend_bottom else 30),
         paper_bgcolor="white",
         plot_bgcolor="white",
         font=dict(family="Arial", color="#344054", size=12),
@@ -171,16 +171,14 @@ def plot_layout(fig: go.Figure, height: int = 390, legend_bottom: bool = True) -
         hovermode="closest",
         separators=",.",
     )
-    # Os nomes dos campos já aparecem no título e na legenda. Retirar os títulos
-    # dos eixos libera espaço e evita sobreposição em telas menores.
-    fig.update_xaxes(title_text="", showgrid=False, automargin=True)
-    fig.update_yaxes(title_text="", gridcolor="#EDF0F4", zeroline=False, automargin=True)
+    fig.update_xaxes(title_text="", showgrid=False, automargin=True, showline=False)
+    fig.update_yaxes(title_text="", gridcolor="#EDF0F4", zeroline=False, automargin=True, showline=False)
     return fig
 
 
 def apply_brl_axis(fig: go.Figure, axis: str = "y") -> go.Figure:
-    # Formato monetário brasileiro completo nos eixos: R$ 1.234.567,89.
-    # O layout usa separators=",.", portanto vírgula é decimal e ponto é milhar.
+    # Mantém o formato monetário no hover e para eventuais eixos visíveis,
+    # mesmo quando escondemos os ticks para priorizar rótulos nas barras.
     axis_update = dict(
         tickprefix="R$ ",
         tickformat=",.2f",
@@ -189,6 +187,31 @@ def apply_brl_axis(fig: go.Figure, axis: str = "y") -> go.Figure:
         showexponent="none",
         automargin=True,
     )
+    if axis == "x":
+        fig.update_xaxes(**axis_update)
+    else:
+        fig.update_yaxes(**axis_update)
+    return fig
+
+
+def compact_currency_label(value: float) -> str:
+    value = float(value or 0)
+    av = abs(value)
+    if av >= 1_000_000_000:
+        return f"{value / 1_000_000_000:,.1f} bi".replace(",", "X").replace(".", ",").replace("X", ".")
+    if av >= 1_000_000:
+        return f"{value / 1_000_000:,.1f} mi".replace(",", "X").replace(".", ",").replace("X", ".")
+    if av >= 1_000:
+        return f"{value / 1_000:,.1f} mil".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{value:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def compact_percent_label(value: float) -> str:
+    return f"{float(value or 0) * 100:,.1f}%".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def hide_value_axis(fig: go.Figure, axis: str = "y") -> go.Figure:
+    axis_update = dict(showticklabels=False, showgrid=False, zeroline=False, ticks="", showline=False)
     if axis == "x":
         fig.update_xaxes(**axis_update)
     else:
@@ -657,31 +680,51 @@ with tab_exec:
     c1, c2 = st.columns([1.45, 1])
     with c1:
         fig = go.Figure()
-        fig.add_bar(x=monthly["Mês Texto"], y=monthly["Faturamento"], name="Faturamento", marker_color=BLUE)
-        fig.add_scatter(x=monthly["Mês Texto"], y=monthly["Meta"], name="Meta", mode="lines+markers", line=dict(color=ORANGE, width=3))
+        fig.add_bar(
+            x=monthly["Mês Texto"], y=monthly["Faturamento"], name="Faturamento", marker_color=BLUE,
+            text=monthly["Faturamento"].map(compact_currency_label), textposition="outside", cliponaxis=False
+        )
+        fig.add_scatter(
+            x=monthly["Mês Texto"], y=monthly["Meta"], name="Meta", mode="lines+markers+text",
+            line=dict(color=ORANGE, width=3), text=monthly["Meta"].map(compact_currency_label),
+            textposition="top center"
+        )
         fig.update_layout(title="Faturamento x Meta")
         apply_brl_axis(fig, "y")
+        hide_value_axis(fig, "y")
         st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
     with c2:
+        waterfall_values = [
+            totals["Receita Operacional"], -totals["Custos Variáveis"], -totals["Custos Fixos"],
+            totals["IRPJ/CSLL add-back"], totals["EBITDA Gerencial"]
+        ]
         waterfall = go.Figure(go.Waterfall(
             name="Resultado", orientation="v", measure=["absolute", "relative", "relative", "relative", "total"],
             x=["Receita<br>operacional", "Custos<br>variáveis", "Custos<br>fixos", "IRPJ/CSLL<br>add-back", "EBITDA"],
-            y=[totals["Receita Operacional"], -totals["Custos Variáveis"], -totals["Custos Fixos"], totals["IRPJ/CSLL add-back"], totals["EBITDA Gerencial"]],
+            y=waterfall_values,
             connector={"line": {"color": "#98A2B3"}},
             increasing={"marker": {"color": GREEN}}, decreasing={"marker": {"color": RED}}, totals={"marker": {"color": NAVY}},
-            texttemplate="", textposition="none",
+            text=[compact_currency_label(v) for v in waterfall_values], textposition="outside", cliponaxis=False,
         ))
         waterfall.update_layout(title="Ponte do EBITDA Gerencial")
         apply_brl_axis(waterfall, "y")
+        hide_value_axis(waterfall, "y")
         st.plotly_chart(plot_layout(waterfall, 420, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
     c3, c4 = st.columns(2)
     with c3:
         fig = go.Figure()
-        fig.add_scatter(x=monthly["Mês Texto"], y=monthly["MC %"], name="Margem de contribuição", mode="lines+markers", line=dict(color=TEAL, width=3))
-        fig.add_scatter(x=monthly["Mês Texto"], y=monthly["Margem EBITDA"], name="Margem EBITDA", mode="lines+markers", line=dict(color=NAVY, width=3))
+        fig.add_scatter(
+            x=monthly["Mês Texto"], y=monthly["MC %"], name="Margem de contribuição", mode="lines+markers+text",
+            line=dict(color=TEAL, width=3), text=monthly["MC %"].map(compact_percent_label), textposition="top center"
+        )
+        fig.add_scatter(
+            x=monthly["Mês Texto"], y=monthly["Margem EBITDA"], name="Margem EBITDA", mode="lines+markers+text",
+            line=dict(color=NAVY, width=3), text=monthly["Margem EBITDA"].map(compact_percent_label), textposition="bottom center"
+        )
         fig.update_yaxes(tickformat=".0%")
         fig.update_layout(title="Evolução das Margens")
+        hide_value_axis(fig, "y")
         st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
     with c4:
         exec_costs = period_filter(expenses, start_month, end_month)
@@ -689,8 +732,9 @@ with tab_exec:
         top_cost = exec_costs.groupby("PAI", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(8)
         top_cost["Natureza"] = top_cost["PAI"].map(lambda x: short_label(x, 34))
         fig = px.bar(top_cost.sort_values("_VALOR"), x="_VALOR", y="Natureza", orientation="h", title="Principais Despesas Operacionais", custom_data=["PAI"])
-        fig.update_traces(marker_color=BLUE, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        fig.update_traces(marker_color=BLUE, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>", text=top_cost.sort_values("_VALOR")["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False)
         apply_brl_axis(fig, "x")
+        hide_value_axis(fig, "x")
         st.plotly_chart(plot_layout(fig, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
     st.markdown("<div class='section-title'>Leitura executiva automática</div>", unsafe_allow_html=True)
@@ -800,31 +844,38 @@ with tab_com:
         by_month = com.groupby("_MES", as_index=False)["_VALOR"].sum()
         by_month["Mês"] = by_month["_MES"].map(month_label)
         fig = px.bar(by_month, x="Mês", y="_VALOR", title="Faturamento Mensal Filtrado")
-        fig.update_traces(marker_color=BLUE, hovertemplate="%{x}<br>Valor: R$ %{y:,.2f}<extra></extra>")
+        fig.update_traces(marker_color=BLUE, hovertemplate="%{x}<br>Valor: R$ %{y:,.2f}<extra></extra>", text=by_month["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False)
         apply_brl_axis(fig, "y")
+        hide_value_axis(fig, "y")
         st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
     with c2:
         by_manager = com.groupby("GERENTE", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False)
         by_manager["Gerente"] = by_manager["GERENTE"].map(lambda x: short_label(x, 30))
-        fig = px.bar(by_manager.sort_values("_VALOR"), x="_VALOR", y="Gerente", orientation="h", title="Faturamento por Gerente", custom_data=["GERENTE"])
-        fig.update_traces(marker_color=TEAL, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        by_manager_plot = by_manager.sort_values("_VALOR")
+        fig = px.bar(by_manager_plot, x="_VALOR", y="Gerente", orientation="h", title="Faturamento por Gerente", custom_data=["GERENTE"])
+        fig.update_traces(marker_color=TEAL, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>", text=by_manager_plot["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False)
         apply_brl_axis(fig, "x")
+        hide_value_axis(fig, "x")
         st.plotly_chart(plot_layout(fig, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
     c3, c4 = st.columns(2)
     with c3:
         by_segment = com.groupby("SEGMENTO", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(12)
-        fig = px.bar(by_segment.sort_values("_VALOR"), x="_VALOR", y="SEGMENTO", orientation="h", title="Principais Segmentos")
-        fig.update_traces(marker_color=BLUE, hovertemplate="%{y}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        by_segment_plot = by_segment.sort_values("_VALOR")
+        fig = px.bar(by_segment_plot, x="_VALOR", y="SEGMENTO", orientation="h", title="Principais Segmentos")
+        fig.update_traces(marker_color=BLUE, hovertemplate="%{y}<br>Valor: R$ %{x:,.2f}<extra></extra>", text=by_segment_plot["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False)
         apply_brl_axis(fig, "x")
+        hide_value_axis(fig, "x")
         st.plotly_chart(plot_layout(fig, 430, legend_bottom=False), width="stretch", config={"displayModeBar": False})
     with c4:
         type_col = "NOVA" if "NOVA" in com.columns else "CATEGORIA"
         by_type = com.groupby(type_col, as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(10)
         by_type["Tipo"] = by_type[type_col].map(lambda x: short_label(x, 32))
-        fig = px.bar(by_type.sort_values("_VALOR"), x="_VALOR", y="Tipo", orientation="h", title="Mix de Receita", custom_data=[type_col])
-        fig.update_traces(marker_color=TEAL, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        by_type_plot = by_type.sort_values("_VALOR")
+        fig = px.bar(by_type_plot, x="_VALOR", y="Tipo", orientation="h", title="Mix de Receita", custom_data=[type_col])
+        fig.update_traces(marker_color=TEAL, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>", text=by_type_plot["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False)
         apply_brl_axis(fig, "x")
+        hide_value_axis(fig, "x")
         st.plotly_chart(plot_layout(fig, 430, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
     c5, c6 = st.columns(2)
@@ -858,18 +909,35 @@ with tab_cash:
     c1, c2 = st.columns(2)
     with c1:
         fig = go.Figure()
-        fig.add_bar(x=monthly["Mês Texto"], y=monthly["Recebimento Previsto"], name="Previsto", marker_color="#A7C4DF")
-        fig.add_scatter(x=monthly["Mês Texto"], y=monthly["Recebimento Realizado"], name="Realizado", mode="lines+markers", line=dict(color=TEAL, width=3))
+        fig.add_bar(
+            x=monthly["Mês Texto"], y=monthly["Recebimento Previsto"], name="Previsto", marker_color="#A7C4DF",
+            text=monthly["Recebimento Previsto"].map(compact_currency_label), textposition="outside", cliponaxis=False
+        )
+        fig.add_scatter(
+            x=monthly["Mês Texto"], y=monthly["Recebimento Realizado"], name="Realizado", mode="lines+markers+text",
+            line=dict(color=TEAL, width=3), text=monthly["Recebimento Realizado"].map(compact_currency_label), textposition="top center"
+        )
         fig.update_layout(title="Recebimento Previsto x Realizado")
         apply_brl_axis(fig, "y")
+        hide_value_axis(fig, "y")
         st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
     with c2:
         fig = go.Figure()
-        fig.add_bar(x=monthly["Mês Texto"], y=monthly["Receita Operacional"], name="Receitas operacionais", marker_color=BLUE)
-        fig.add_bar(x=monthly["Mês Texto"], y=monthly["Despesas Operacionais"], name="Despesas operacionais", marker_color=RED)
-        fig.add_scatter(x=monthly["Mês Texto"], y=monthly["EBITDA Gerencial"], name="EBITDA", mode="lines+markers", line=dict(color=GREEN, width=3))
+        fig.add_bar(
+            x=monthly["Mês Texto"], y=monthly["Receita Operacional"], name="Receitas operacionais", marker_color=BLUE,
+            text=monthly["Receita Operacional"].map(compact_currency_label), textposition="outside", cliponaxis=False
+        )
+        fig.add_bar(
+            x=monthly["Mês Texto"], y=monthly["Despesas Operacionais"], name="Despesas operacionais", marker_color=RED,
+            text=monthly["Despesas Operacionais"].map(compact_currency_label), textposition="outside", cliponaxis=False
+        )
+        fig.add_scatter(
+            x=monthly["Mês Texto"], y=monthly["EBITDA Gerencial"], name="EBITDA", mode="lines+markers+text",
+            line=dict(color=GREEN, width=3), text=monthly["EBITDA Gerencial"].map(compact_currency_label), textposition="top center"
+        )
         fig.update_layout(title="Receita, Despesa e EBITDA Gerencial", barmode="group")
         apply_brl_axis(fig, "y")
+        hide_value_axis(fig, "y")
         st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
 
     c3, c4, c5, c6 = st.columns(4)
@@ -894,21 +962,25 @@ with tab_cash:
     comp["Grupo"] = comp["_GRUPO_N"].map(label_map).fillna(comp["_GRUPO_N"].str.title())
     comp = comp[comp["_GRUPO_N"].isin(label_map)]
     fig = px.bar(comp, x="Grupo", y="_VALOR", color="Grupo", title="Composição das Entradas e Saídas")
+    fig.update_traces(text=comp["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False)
     fig.update_layout(showlegend=False)
     apply_brl_axis(fig, "y")
+    hide_value_axis(fig, "y")
     st.plotly_chart(plot_layout(fig, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
     non_op = rev_period[rev_period["_GRUPO_N"] == "RECEITAS NAO OPERACIONAIS"].copy()
     if not non_op.empty:
         non_op_summary = non_op.groupby("PAI", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False)
         non_op_summary["Natureza"] = non_op_summary["PAI"].map(lambda x: short_label(x, 38))
+        non_op_plot = non_op_summary.sort_values("_VALOR")
         fig = px.bar(
-            non_op_summary.sort_values("_VALOR"), x="_VALOR", y="Natureza", orientation="h",
+            non_op_plot, x="_VALOR", y="Natureza", orientation="h",
             title="Detalhamento das Entradas Não Operacionais",
             custom_data=["PAI"],
         )
-        fig.update_traces(marker_color=ORANGE, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        fig.update_traces(marker_color=ORANGE, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>", text=non_op_plot["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False)
         apply_brl_axis(fig, "x")
+        hide_value_axis(fig, "x")
         st.plotly_chart(plot_layout(fig, 350, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
 # =========================================================
@@ -927,16 +999,20 @@ with tab_cost:
     c1, c2 = st.columns(2)
     with c1:
         pareto = cost_period.groupby("PAI", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(15)
-        fig = px.bar(pareto.sort_values("_VALOR"), x="_VALOR", y="PAI", orientation="h", title="Pareto de Despesas")
-        fig.update_traces(marker_color=BLUE, hovertemplate="%{y}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        pareto_plot = pareto.sort_values("_VALOR")
+        fig = px.bar(pareto_plot, x="_VALOR", y="PAI", orientation="h", title="Pareto de Despesas")
+        fig.update_traces(marker_color=BLUE, hovertemplate="%{y}<br>Valor: R$ %{x:,.2f}<extra></extra>", text=pareto_plot["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False)
         apply_brl_axis(fig, "x")
+        hide_value_axis(fig, "x")
         st.plotly_chart(plot_layout(fig, 500, legend_bottom=False), width="stretch", config={"displayModeBar": False})
     with c2:
         by_cc = cost_period.groupby("CENTRO DE CUSTOS RATEAO", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(12)
         by_cc["Rateio"] = by_cc["CENTRO DE CUSTOS RATEAO"].map(lambda x: short_label(x, 34))
-        fig = px.bar(by_cc.sort_values("_VALOR"), x="_VALOR", y="Rateio", orientation="h", title="Despesas por Rateio", custom_data=["CENTRO DE CUSTOS RATEAO"])
-        fig.update_traces(marker_color=TEAL, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        by_cc_plot = by_cc.sort_values("_VALOR")
+        fig = px.bar(by_cc_plot, x="_VALOR", y="Rateio", orientation="h", title="Despesas por Rateio", custom_data=["CENTRO DE CUSTOS RATEAO"])
+        fig.update_traces(marker_color=TEAL, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>", text=by_cc_plot["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False)
         apply_brl_axis(fig, "x")
+        hide_value_axis(fig, "x")
         st.plotly_chart(plot_layout(fig, 500, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
     st.divider()
