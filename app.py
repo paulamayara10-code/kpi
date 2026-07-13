@@ -475,30 +475,28 @@ def clean_table(df: pd.DataFrame, height: int = 360, max_rows: int = 250) -> Non
 
 
 def line_result_lollipop(df: pd.DataFrame, title: str) -> go.Figure:
-    """Resultado por linha em formato lollipop, mais limpo que barras largas."""
-    p = df.sort_values("Resultado Direto de Caixa").copy()
+    """Resultado por linha em barras verticais para leitura mais limpa de valores negativos."""
+    p = df.sort_values("Resultado Direto de Caixa", ascending=False).copy()
+    p["Cor"] = np.where(p["Resultado Direto de Caixa"] >= 0, BLUE, RED)
+    p["Texto"] = p["Resultado Direto de Caixa"].map(compact_money)
+
     fig = go.Figure()
-    for _, row in p.iterrows():
-        value = float(row["Resultado Direto de Caixa"])
-        color = BLUE if value >= 0 else RED
-        fig.add_shape(
-            type="line", x0=0, x1=value, y0=row["Linha"], y1=row["Linha"],
-            line=dict(color=color, width=5), layer="below",
-        )
-    fig.add_trace(go.Scatter(
-        x=p["Resultado Direto de Caixa"], y=p["Linha"], mode="markers+text",
-        marker=dict(size=18, color=[BLUE if v >= 0 else RED for v in p["Resultado Direto de Caixa"]],
-                    line=dict(color=WHITE, width=2)),
-        text=p["Resultado Direto de Caixa"].map(compact_money),
-        textposition=["middle right" if v >= 0 else "middle left" for v in p["Resultado Direto de Caixa"]],
-        textfont=dict(size=10, color=NAVY), cliponaxis=False,
+    fig.add_trace(go.Bar(
+        x=p["Linha"],
+        y=p["Resultado Direto de Caixa"],
+        marker=dict(color=p["Cor"], line=dict(color="rgba(7,27,51,.10)", width=0.8)),
+        text=p["Texto"],
+        textposition="outside",
+        textfont=dict(size=10, color=NAVY),
+        cliponaxis=False,
         customdata=p[["Linha"]],
-        hovertemplate="%{customdata[0]}<br>Resultado: R$ %{x:,.2f}<extra></extra>",
+        hovertemplate="%{customdata[0]}<br>Resultado: R$ %{y:,.2f}<extra></extra>",
         showlegend=False,
     ))
-    fig.add_vline(x=0, line_color="#AFC4D6", line_width=1.4)
-    fig.update_layout(title=title, showlegend=False)
-    hide_value_axis(fig, "x")
+    fig.add_hline(y=0, line_color="#AFC4D6", line_width=1.4)
+    fig.update_layout(title=title, showlegend=False, bargap=.42)
+    hide_value_axis(fig, "y")
+    fig.update_xaxes(showgrid=False, ticks="", tickfont=dict(color="#61758A", size=11))
     return fig
 
 
