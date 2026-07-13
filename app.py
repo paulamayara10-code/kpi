@@ -53,9 +53,9 @@ LINE_LABELS = {
 }
 LINE_COLORS = {
     "MICROTECH": "#00A7B5",
-    "LOCACAO": "#1261A0",
-    "VENDAS": "#1B7F5A",
-    "ENDOSCOPIA": "#6E55A3",
+    "LOCACAO": "#071B33",
+    "VENDAS": "#1261A0",
+    "ENDOSCOPIA": "#5FA8D3",
 }
 
 MANAGER_LINE_MAP = {
@@ -72,15 +72,23 @@ st.markdown(
     :root {{ --navy:{NAVY}; --blue:{BLUE}; --cyan:{CYAN}; --green:{GREEN}; --light:{LIGHT}; }}
     .stApp {{ background:{LIGHT}; }}
     .block-container {{ max-width:1540px; padding-top:.85rem; padding-bottom:2.3rem; }}
-    [data-testid="stSidebar"] {{ background:#FFFFFF; border-right:1px solid {BORDER}; }}
+    [data-testid="stSidebar"] {{ background:linear-gradient(180deg,#071B33 0%,#0B2F55 100%); border-right:0; }}
     [data-testid="stSidebar"] .block-container {{ padding-top:1rem; }}
+    [data-testid="stSidebar"] label, [data-testid="stSidebar"] p, [data-testid="stSidebar"] span {{ color:#EAF4FB; }}
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4 {{ color:#FFFFFF; }}
+    [data-testid="stSidebar"] [data-baseweb="select"] > div,
+    [data-testid="stSidebar"] input {{ background:#FFFFFF; color:#071B33; border-radius:10px; }}
+    [data-testid="stSidebar"] [data-baseweb="select"] span,
+    [data-testid="stSidebar"] input {{ color:#071B33 !important; }}
+    [data-testid="stSidebar"] [role="radiogroup"] label {{ background:rgba(255,255,255,.045); margin-bottom:4px; border:1px solid rgba(255,255,255,.06); }}
+    [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{ background:rgba(0,167,181,.20); border-color:rgba(117,227,232,.35); }}
     [data-testid="stPlotlyChart"] {{ background:#FFFFFF; border:1px solid {BORDER}; border-radius:18px; padding:4px 7px; box-shadow:0 5px 18px rgba(7,27,51,.045); overflow:hidden; }}
     div[data-testid="stDataFrame"] {{ border:1px solid {BORDER}; border-radius:16px; overflow:hidden; background:white; }}
     div[data-testid="stDownloadButton"] button, div[data-testid="stButton"] button {{ border-radius:11px; font-weight:750; }}
 
     .first-sidebar {{
-        background:linear-gradient(140deg,{NAVY},{NAVY_2}); color:white; border-radius:18px;
-        padding:17px 18px; margin:0 0 12px 0; box-shadow:0 10px 24px rgba(7,27,51,.16);
+        background:rgba(255,255,255,.08); color:white; border:1px solid rgba(255,255,255,.10); border-radius:16px;
+        padding:16px 17px; margin:0 0 12px 0; box-shadow:none;
     }}
     .first-sidebar .brand {{ font-size:1.30rem; font-weight:950; letter-spacing:.16em; line-height:1; }}
     .first-sidebar .brand small {{ display:block; color:#75E3E8; font-size:.58rem; letter-spacing:.30em; margin-top:6px; }}
@@ -127,7 +135,13 @@ st.markdown(
 
     .scope-note {{ background:#EDF7F8; border:1px solid #CDECEF; border-radius:13px; padding:11px 13px; color:#155C64; font-size:.77rem; line-height:1.45; }}
     .warning-note {{ background:#FFF7E8; border:1px solid #F1D59B; border-radius:13px; padding:11px 13px; color:#684900; font-size:.77rem; line-height:1.45; }}
-    .secure-note {{ background:#EDF3FA; border:1px solid #D4E2F0; border-radius:12px; padding:10px 12px; color:#234B70; font-size:.73rem; line-height:1.4; }}
+    .secure-note {{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:10px 12px; color:#EAF4FB; font-size:.73rem; line-height:1.4; }}
+    .login-brand {{ text-align:center; margin:3.8rem auto 1.2rem auto; }}
+    .login-brand .logo {{ color:#071B33; font-size:1.55rem; font-weight:950; letter-spacing:.15em; }}
+    .login-brand .logo span {{ color:#00A7B5; }}
+    .login-brand p {{ color:#667085; margin:.45rem 0 0; font-size:.82rem; }}
+    div[data-testid="stForm"] {{ background:#FFFFFF; border:1px solid #DCE5EE; border-radius:20px; padding:1.15rem 1.2rem 1.25rem; box-shadow:0 18px 50px rgba(7,27,51,.10); }}
+    div[data-testid="stForm"] button {{ background:linear-gradient(90deg,#071B33,#1261A0); color:#FFFFFF; border:0; min-height:2.8rem; }}
     .user-pill {{ display:flex; align-items:center; justify-content:space-between; gap:8px; background:#F4F7FA; border:1px solid {BORDER}; border-radius:12px; padding:9px 10px; margin:8px 0; }}
     .user-pill b {{ color:{NAVY}; font-size:.78rem; }} .user-pill span {{ color:{GRAY}; font-size:.68rem; }}
 
@@ -743,66 +757,95 @@ def password_hash(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
+DEFAULT_USERS = {
+    "paula": {
+        "nome": "Diretoria", "usuario": "paula", "email": "paulamayara10@gmail.com",
+        "senha_hash": "cbae32987728a10b19e2528695dbf676c9b8de0f539bab08b5789c2e9f0d8599",
+        "perfil": "DIRETORIA", "linha": "CONSOLIDADO",
+    },
+    "celso": {
+        "nome": "Celso", "usuario": "celso", "email": "",
+        "senha_hash": "35a4526e8b23c095c14d926e1f4e5614f70c20069200d3cf4f8ef4da80cb240a",
+        "perfil": "GESTOR", "linha": "MICROTECH",
+    },
+    "renato": {
+        "nome": "Renato", "usuario": "renato", "email": "",
+        "senha_hash": "353b16f690d6dadaa2a675f73963bdd60ddc36979922100340761dd3f712341a",
+        "perfil": "GESTOR", "linha": "VENDAS",
+    },
+    "amauri": {
+        "nome": "Amauri", "usuario": "amauri", "email": "",
+        "senha_hash": "5bda933352db6ef4569709d432a7d1ac793977c82fb982c5bae65651015493c5",
+        "perfil": "GESTOR", "linha": "LOCACAO",
+    },
+    "ronaldo": {
+        "nome": "Ronaldo", "usuario": "ronaldo", "email": "",
+        "senha_hash": "21ce9c880661ca01dc3af90a1803b32244e1743ba8fef495e83ef10204546fc2",
+        "perfil": "GESTOR", "linha": "ENDOSCOPIA",
+    },
+}
+
+
 def secret_users() -> dict[str, dict]:
+    users = {key: dict(value) for key, value in DEFAULT_USERS.items()}
     try:
         raw = st.secrets.get("usuarios", {})
-        return {str(k): dict(v) for k, v in raw.items()}
+        for key, value in raw.items():
+            users[str(key)] = dict(value)
     except Exception:
-        return {}
+        pass
+    return users
 
 
 def authenticate() -> dict[str, str]:
     users = secret_users()
-    if users:
-        if "auth_user" not in st.session_state:
+    if "auth_user" not in st.session_state:
+        profile_order = ["paula", "celso", "renato", "amauri", "ronaldo"]
+        available = [key for key in profile_order if key in users]
+        profile_labels = {
+            "paula": "Diretoria",
+            "celso": "Celso · Microtech",
+            "renato": "Renato · Vendas",
+            "amauri": "Amauri · Locação",
+            "ronaldo": "Ronaldo · Endoscopia",
+        }
+        left, center, right = st.columns([1, 1.05, 1])
+        with center:
             st.markdown(
-                f"""
-                <div class='dashboard-hero' style='max-width:760px;margin:4.5rem auto 1.3rem auto'>
-                  <div class='hero-brand'>First Medical · Controladoria</div>
-                  <h1>Acesso ao painel executivo</h1>
-                  <p>Entre com seu usuário para acessar somente as informações autorizadas.</p>
+                """
+                <div class='login-brand'>
+                  <div class='logo'>FIRST <span>INTELLIGENCE</span></div>
+                  <p>Painel gerencial de caixa por perfil</p>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
             with st.form("login_form", clear_on_submit=False):
-                email = st.text_input("E-mail ou usuário")
+                selected = st.selectbox(
+                    "Perfil de acesso",
+                    available,
+                    format_func=lambda key: profile_labels.get(key, users[key].get("nome", key)),
+                )
                 password = st.text_input("Senha", type="password")
-                submitted = st.form_submit_button("Entrar", width="stretch")
+                submitted = st.form_submit_button("Acessar painel", width="stretch")
             if submitted:
-                found_key = None
-                for key, cfg in users.items():
-                    identifiers = {norm(key), norm(cfg.get("email", "")), norm(cfg.get("usuario", ""))}
-                    if norm(email) in identifiers:
-                        found_key = key
-                        break
-                if found_key:
-                    cfg = users[found_key]
-                    expected = str(cfg.get("senha_hash", ""))
-                    valid = expected and password_hash(password) == expected
-                    if not valid and cfg.get("senha") is not None:
-                        valid = password == str(cfg.get("senha"))
-                    if valid:
-                        st.session_state["auth_user"] = {
-                            "nome": str(cfg.get("nome", found_key)),
-                            "email": str(cfg.get("email", email)),
-                            "perfil": norm(cfg.get("perfil", "GESTOR")),
-                            "linha": norm(cfg.get("linha", "VENDAS")),
-                            "secure": "Sim",
-                        }
-                        st.rerun()
-                st.error("Usuário ou senha inválidos.")
-            st.stop()
-        return st.session_state["auth_user"]
-
-    # Modo demonstração: facilita validação antes da criação dos segredos.
-    with st.sidebar:
-        st.warning("Modo demonstração: configure `.streamlit/secrets.toml` antes de publicar.")
-        demo = st.selectbox("Perfil de demonstração", ["Diretoria", "Microtech", "Locação", "Vendas", "Endoscopia"])
-    if demo == "Diretoria":
-        return {"nome": "Diretoria", "email": "modo demonstração", "perfil": "DIRETORIA", "linha": "CONSOLIDADO", "secure": "Não"}
-    line = {"Microtech": "MICROTECH", "Locação": "LOCACAO", "Vendas": "VENDAS", "Endoscopia": "ENDOSCOPIA"}[demo]
-    return {"nome": f"Gestor {demo}", "email": "modo demonstração", "perfil": "GESTOR", "linha": line, "secure": "Não"}
+                cfg = users[selected]
+                expected = str(cfg.get("senha_hash", ""))
+                valid = bool(expected) and password_hash(password) == expected
+                if not valid and cfg.get("senha") is not None:
+                    valid = password == str(cfg.get("senha"))
+                if valid:
+                    st.session_state["auth_user"] = {
+                        "nome": str(cfg.get("nome", selected)),
+                        "email": str(cfg.get("email", "")),
+                        "perfil": norm(cfg.get("perfil", "GESTOR")),
+                        "linha": norm(cfg.get("linha", "VENDAS")),
+                        "secure": "Sim",
+                    }
+                    st.rerun()
+                st.error("Senha incorreta para o perfil selecionado.")
+        st.stop()
+    return st.session_state["auth_user"]
 
 
 # =========================================================
@@ -858,23 +901,62 @@ def line_cash_monthly(
     line: str, fat: pd.DataFrame, receitas: pd.DataFrame, custos: pd.DataFrame,
     start: pd.Period, end: pd.Period,
 ) -> pd.DataFrame:
+    """Resultado direto por linha, integralmente apurado na aba Centro de Custos.
+
+    Receita: EMPRESA = RECEITA, GRUPO = Receitas Operacionais e centro de custo direto da linha.
+    Custo: EMPRESA = DESPESAS, GRUPO = Saídas Operacionais e centro de custo direto da linha.
+    O campo CENTRO DE CUSTOS RATEAO não é utilizado.
+    """
     months = pd.period_range(start, end, freq="M")
     out = pd.DataFrame({"Mês": months})
-    f = period_filter(fat[fat["_LINHA"] == line], start, end).groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_MES": "Mês", "_VALOR": "Faturamento"})
-    rbase = receitas[(receitas["_LINHA"] == line) & (~receitas["_NAO_OPERACIONAL"])]
-    r = period_filter(rbase, start, end).groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_MES": "Mês", "_VALOR": "Receitas Recebidas"})
-    cbase = custos[(custos["_LINHA_DIRETA"] == line) & (custos["_GRUPO_N"] == "SAIDAS OPERACIONAIS")].copy()
+
+    f = (
+        period_filter(fat[fat["_LINHA"] == line], start, end)
+        .groupby("_MES", as_index=False)["_VALOR"].sum()
+        .rename(columns={"_MES": "Mês", "_VALOR": "Faturamento"})
+    )
+
+    direct = custos[custos["_LINHA_DIRETA"] == line].copy()
+    rbase = direct[
+        (direct["_EMPRESA_N"] == "RECEITA") &
+        (direct["_GRUPO_N"] == "RECEITAS OPERACIONAIS")
+    ].copy()
+    cbase = direct[
+        (direct["_EMPRESA_N"] == "DESPESAS") &
+        (direct["_GRUPO_N"] == "SAIDAS OPERACIONAIS")
+    ].copy()
     cbase["_CLASSE_CAIXA"] = cbase["PAI"].map(cost_class)
-    c = period_filter(cbase, start, end).groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_MES": "Mês", "_VALOR": "Custos Diretos Pagos"})
-    v = period_filter(cbase[cbase["_CLASSE_CAIXA"] == "VARIAVEL"], start, end).groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_MES": "Mês", "_VALOR": "Custos Diretos Variáveis"})
+
+    r = (
+        period_filter(rbase, start, end).groupby("_MES", as_index=False)["_VALOR"].sum()
+        .rename(columns={"_MES": "Mês", "_VALOR": "Receitas Recebidas"})
+    )
+    c = (
+        period_filter(cbase, start, end).groupby("_MES", as_index=False)["_VALOR"].sum()
+        .rename(columns={"_MES": "Mês", "_VALOR": "Custos Diretos Pagos"})
+    )
+    v = (
+        period_filter(cbase[cbase["_CLASSE_CAIXA"] == "VARIAVEL"], start, end)
+        .groupby("_MES", as_index=False)["_VALOR"].sum()
+        .rename(columns={"_MES": "Mês", "_VALOR": "Custos Diretos Variáveis"})
+    )
+
     for df in [f, r, c, v]:
         out = out.merge(df, on="Mês", how="left")
     out = out.fillna(0)
     out["Resultado Direto de Caixa"] = out["Receitas Recebidas"] - out["Custos Diretos Pagos"]
-    out["Margem Direta de Caixa"] = np.where(out["Receitas Recebidas"] != 0, out["Resultado Direto de Caixa"] / out["Receitas Recebidas"], 0)
+    out["Margem Direta de Caixa"] = np.where(
+        out["Receitas Recebidas"] != 0,
+        out["Resultado Direto de Caixa"] / out["Receitas Recebidas"], 0,
+    )
     out["Contribuição Direta de Caixa"] = out["Receitas Recebidas"] - out["Custos Diretos Variáveis"]
-    out["Margem de Contribuição Direta"] = np.where(out["Receitas Recebidas"] != 0, out["Contribuição Direta de Caixa"] / out["Receitas Recebidas"], 0)
-    out["Conversão em Caixa"] = np.where(out["Faturamento"] != 0, out["Receitas Recebidas"] / out["Faturamento"], 0)
+    out["Margem de Contribuição Direta"] = np.where(
+        out["Receitas Recebidas"] != 0,
+        out["Contribuição Direta de Caixa"] / out["Receitas Recebidas"], 0,
+    )
+    out["Conversão em Caixa"] = np.where(
+        out["Faturamento"] != 0, out["Receitas Recebidas"] / out["Faturamento"], 0,
+    )
     out["Mês Texto"] = out["Mês"].map(month_label)
     return out
 
@@ -901,8 +983,15 @@ def line_summary(fat: pd.DataFrame, receitas: pd.DataFrame, custos: pd.DataFrame
     for line in LINES:
         monthly = line_cash_monthly(line, fat, receitas, custos, start, end)
         t = totals_from_monthly(monthly, True)
-        r_scope = period_filter(receitas[(receitas["_LINHA"] == line) & (~receitas["_NAO_OPERACIONAL"])], start, end)
-        secure = r_scope[r_scope["_MATCH_METHOD"].isin(["Exata", "Similar"])]
+        direct = period_filter(custos[custos["_LINHA_DIRETA"] == line], start, end)
+        revenue_rows = direct[
+            (direct["_EMPRESA_N"] == "RECEITA") &
+            (direct["_GRUPO_N"] == "RECEITAS OPERACIONAIS")
+        ]
+        cost_rows = direct[
+            (direct["_EMPRESA_N"] == "DESPESAS") &
+            (direct["_GRUPO_N"] == "SAIDAS OPERACIONAIS")
+        ]
         overdue = 0.0
         if inad is not None and not inad.empty:
             overdue = float(inad[inad["_LINHA"] == line]["_VALOR_VENCIDO"].sum())
@@ -915,7 +1004,8 @@ def line_summary(fat: pd.DataFrame, receitas: pd.DataFrame, custos: pd.DataFrame
             "Margem de Contribuição Direta": t.get("Margem de Contribuição Direta", 0),
             "Faturamento": t.get("Faturamento", 0),
             "Conversão em Caixa": t.get("Conversão em Caixa", 0),
-            "Cobertura do Mapeamento": safe_div(float(secure["_VALOR"].sum()), float(r_scope["_VALOR"].sum())),
+            "Lançamentos de Receita": int(len(revenue_rows)),
+            "Lançamentos de Custo": int(len(cost_rows)),
             "Inadimplência": overdue,
         })
     return pd.DataFrame(rows)
@@ -946,7 +1036,7 @@ with st.sidebar:
         """
         <div class='first-sidebar'>
           <div class='brand'>FIRST<small>MEDICAL INTELLIGENCE</small></div>
-          <p>Performance de caixa, rentabilidade direta e gestão por linha de negócio.</p>
+          <p>Caixa realizado, custos diretos, faturamento e inadimplência por linha.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -969,9 +1059,9 @@ with st.sidebar:
     up_base = up_rev = up_inad = None
     if is_director:
         with st.expander("Fontes de dados", expanded=False):
-            up_base = st.file_uploader("Substituir BASE BI", type=["xlsx", "xlsm"], key="up_base_v6")
-            up_rev = st.file_uploader("Substituir REV2026", type=["xlsx", "xlsm"], key="up_rev_v6")
-            up_inad = st.file_uploader("Base de inadimplência (opcional)", type=["xlsx", "xlsm", "csv"], key="up_inad_v6")
+            up_base = st.file_uploader("Substituir BASE BI", type=["xlsx", "xlsm"], key="up_base_v9")
+            up_rev = st.file_uploader("Substituir REV2026", type=["xlsx", "xlsm"], key="up_rev_v9")
+            up_inad = st.file_uploader("Base de inadimplência (opcional)", type=["xlsx", "xlsm", "csv"], key="up_inad_v9")
             st.caption("Na REV2026, somente abas visíveis são processadas.")
 
 base_bytes, base_name = source_bytes(up_base, default_base)
@@ -1019,7 +1109,7 @@ with st.sidebar:
         st.markdown(f"<div class='secure-note'><b>Visão restrita:</b> {line_label(scope_choice)}. Outras linhas e custos compartilhados não são exibidos.</div>", unsafe_allow_html=True)
 
     st.markdown("#### Navegação")
-    pages = ["Dashboard", "Recebimentos & inadimplência", "Clientes", "Produtos", "Custos diretos", "Qualidade & metodologia"]
+    pages = ["Dashboard", "Recebimentos & inadimplência", "Clientes", "Produtos", "Custos diretos", "Fontes & regras"]
     if is_director:
         pages.insert(1, "Linhas de negócio")
     page = st.radio("Navegação", pages, label_visibility="collapsed")
@@ -1039,7 +1129,7 @@ st.markdown(
         <div>
           <div class='hero-brand'>First Medical · Controladoria</div>
           <h1>{'Painel Executivo de Caixa' if scope_choice == 'CONSOLIDADO' else 'Resultado de Caixa · ' + scope_text}</h1>
-          <p>Indicadores realizados por recebimento e pagamento, com visão comercial apenas como apoio.</p>
+          <p>Receitas e pagamentos realizados · centros de custo diretos · sem rateio nas visões por linha.</p>
         </div>
         <div class='hero-chips'>
           <span class='hero-chip'>{period_text}</span>
@@ -1080,7 +1170,7 @@ if page == "Dashboard":
         c1, c2 = st.columns([1.35, 1])
         with c1:
             fig = go.Figure()
-            fig.add_bar(x=company_monthly["Mês Texto"], y=company_monthly["Receitas Operacionais"], name="Receitas recebidas", marker_color=BLUE,
+            fig.add_bar(x=company_monthly["Mês Texto"], y=company_monthly["Receitas Operacionais"], name="Receitas diretas", marker_color=BLUE,
                         text=company_monthly["Receitas Operacionais"].map(compact_money), textposition="outside", cliponaxis=False)
             fig.add_bar(x=company_monthly["Mês Texto"], y=company_monthly["Saídas Operacionais"], name="Saídas pagas", marker_color="#D26A62",
                         text=company_monthly["Saídas Operacionais"].map(compact_money), textposition="outside", cliponaxis=False)
@@ -1106,30 +1196,39 @@ if page == "Dashboard":
             hide_value_axis(bridge, "y")
             st.plotly_chart(plot_layout(bridge, 430, False), width="stretch", config={"displayModeBar": False})
 
-        section_header("Visão por linha de negócio", "Receitas recebidas e custos pagos diretamente vinculados a cada linha", "Sem rateio")
+        section_header("Resultado por linha de negócio", "Aba Centro de Custos · receitas e despesas operacionais diretas", "Sem rateio")
         l1, l2 = st.columns([1.25, 1])
         with l1:
             chart_df = lines_table.sort_values("Resultado Direto de Caixa")
-            fig = px.bar(chart_df, x="Resultado Direto de Caixa", y="Linha", orientation="h", color="Código",
-                         color_discrete_map=LINE_COLORS, title="Resultado direto de caixa por linha")
-            fig.update_traces(text=chart_df["Resultado Direto de Caixa"].map(compact_money), textposition="outside", cliponaxis=False,
-                              hovertemplate="%{y}<br>Resultado: R$ %{x:,.2f}<extra></extra>")
-            fig.update_layout(showlegend=False)
+            fig = go.Figure(go.Bar(
+                x=chart_df["Resultado Direto de Caixa"],
+                y=chart_df["Linha"],
+                orientation="h",
+                marker_color=[LINE_COLORS.get(code, BLUE) if value >= 0 else RED for code, value in zip(chart_df["Código"], chart_df["Resultado Direto de Caixa"])],
+                text=chart_df["Resultado Direto de Caixa"].map(compact_money),
+                textposition=["outside" if value >= 0 else "inside" for value in chart_df["Resultado Direto de Caixa"]],
+                textfont_color=[DARK if value >= 0 else WHITE for value in chart_df["Resultado Direto de Caixa"]],
+                insidetextanchor="middle",
+                cliponaxis=False,
+                customdata=chart_df[["Linha"]],
+                hovertemplate="%{customdata[0]}<br>Resultado: R$ %{x:,.2f}<extra></extra>",
+            ))
+            fig.update_layout(title="Resultado direto de caixa por linha", showlegend=False)
             hide_value_axis(fig, "x")
             st.plotly_chart(plot_layout(fig, 410, False), width="stretch", config={"displayModeBar": False})
         with l2:
             fig = go.Figure()
-            fig.add_bar(x=lines_table["Linha"], y=lines_table["Receitas Recebidas"], name="Receitas recebidas", marker_color=BLUE,
+            fig.add_bar(x=lines_table["Linha"], y=lines_table["Receitas Recebidas"], name="Receitas diretas", marker_color=BLUE,
                         text=lines_table["Receitas Recebidas"].map(compact_money), textposition="outside", cliponaxis=False)
             fig.add_bar(x=lines_table["Linha"], y=lines_table["Custos Diretos Pagos"], name="Custos diretos", marker_color="#D26A62",
                         text=lines_table["Custos Diretos Pagos"].map(compact_money), textposition="outside", cliponaxis=False)
-            fig.update_layout(title="Receitas x custos diretos", barmode="group")
+            fig.update_layout(title="Receitas diretas x custos diretos", barmode="group")
             hide_value_axis(fig, "y")
             st.plotly_chart(plot_layout(fig, 410), width="stretch", config={"displayModeBar": False})
 
-        section_header("Indicadores comerciais de apoio", "Não compõem o resultado de caixa; ajudam a explicar a conversão futura")
+        section_header("Indicadores comerciais", "Faturamento, meta e conversão para o caixa")
         s1, s2, s3, s4 = st.columns(4)
-        with s1: card("Faturamento emitido", brl(company_totals["Faturamento"]), "Competência comercial, apresentado apenas como apoio", BLUE)
+        with s1: card("Faturamento emitido", brl(company_totals["Faturamento"]), "Faturamento emitido no período", BLUE)
         with s2: card("Conversão em caixa", pct(company_totals["Conversão em Caixa"]), "Receita operacional recebida ÷ faturamento emitido", TEAL)
         with s3: card("Performance de recebimento", pct(company_totals["Performance de Recebimento"]), "Realizado ÷ previsto", GREEN if company_totals["Performance de Recebimento"] >= .9 else ORANGE)
         with s4: card("Atingimento da meta", pct(company_totals["Atingimento da Meta"]), "Indicador comercial por competência", CYAN)
@@ -1148,22 +1247,24 @@ if page == "Dashboard":
             insights.append({"title": "Inadimplência vencida", "text": f"Saldo vencido identificado de {brl(overdue)}."})
         else:
             insights.append({"title": "Inadimplência ainda não integrada", "text": "Inclua a base para completar a leitura de conversão, atraso e risco de caixa."})
-        if receipt_match_stats["coverage_value"] < .95:
-            insights.append({"title": "Classificação das receitas por linha", "text": f"{pct(receipt_match_stats['coverage_value'])} do valor recebido foi associado por correspondência exata ou similar; o restante usa regra de fallback."})
-        section_header("Pontos de atenção", "Leituras automáticas sem plano de ação ou recomendações prescritivas", "Diagnóstico")
+        direct_revenue_coverage = safe_div(float(lines_table["Receitas Recebidas"].sum()), company_totals["Receitas Operacionais"])
+        if direct_revenue_coverage < .98:
+            gap = company_totals["Receitas Operacionais"] - float(lines_table["Receitas Recebidas"].sum())
+            insights.append({"title": "Receita fora dos quatro centros de custo", "text": f"{brl(gap)} das receitas operacionais não está classificado diretamente em Microtech, Locação, Vendas ou Endoscopia."})
+        section_header("Pontos de atenção", "Variações identificadas nas bases do período", "Monitoramento")
         insight_cards(insights[:6])
 
     else:
         t = line_totals
         k1, k2, k3, k4 = st.columns(4)
-        with k1: card("Receitas recebidas", brl(t["Receitas Recebidas"]), "Receitas de caixa atribuídas à linha", BLUE)
-        with k2: card("Custos diretos pagos", brl(t["Custos Diretos Pagos"]), "Somente centro de custo direto da linha", RED)
-        with k3: card("Resultado direto de caixa", brl(t["Resultado Direto de Caixa"]), "Receitas recebidas menos custos diretos pagos", GREEN if t["Resultado Direto de Caixa"] >= 0 else RED)
-        with k4: card("Margem direta de caixa", pct(t["Margem Direta de Caixa"]), "Resultado direto ÷ receitas recebidas", TEAL)
+        with k1: card("Receitas operacionais diretas", brl(t["Receitas Recebidas"]), "Centro de Custos · RECEITA", BLUE)
+        with k2: card("Custos operacionais diretos", brl(t["Custos Diretos Pagos"]), "Centro de Custos · DESPESAS", RED)
+        with k3: card("Resultado direto de caixa", brl(t["Resultado Direto de Caixa"]), "Receitas diretas menos custos diretos", GREEN if t["Resultado Direto de Caixa"] >= 0 else RED)
+        with k4: card("Margem direta de caixa", pct(t["Margem Direta de Caixa"]), "Resultado direto ÷ receitas diretas", TEAL)
 
         k5, k6, k7, k8 = st.columns(4)
         with k5: card("Margem de contribuição direta", pct(t["Margem de Contribuição Direta"]), "Após saídas variáveis diretas pagas", CYAN)
-        with k6: card("Faturamento emitido", brl(t["Faturamento"]), "Indicador comercial de apoio", NAVY)
+        with k6: card("Faturamento emitido", brl(t["Faturamento"]), "Faturamento emitido pela linha", NAVY)
         with k7: card("Conversão em caixa", pct(t["Conversão em Caixa"]), "Receitas recebidas ÷ faturamento emitido", TEAL)
         overdue = float(inad_scope["_VALOR_VENCIDO"].sum()) if inad_scope is not None and not inad_scope.empty else 0
         with k8: card("Inadimplência", brl(overdue) if inad is not None else "Base não carregada", "Saldo vencido atribuído à linha", ORANGE)
@@ -1171,20 +1272,20 @@ if page == "Dashboard":
         c1, c2 = st.columns([1.35, 1])
         with c1:
             fig = go.Figure()
-            fig.add_bar(x=line_monthly["Mês Texto"], y=line_monthly["Receitas Recebidas"], name="Receitas recebidas", marker_color=BLUE,
+            fig.add_bar(x=line_monthly["Mês Texto"], y=line_monthly["Receitas Recebidas"], name="Receitas diretas", marker_color=BLUE,
                         text=line_monthly["Receitas Recebidas"].map(compact_money), textposition="outside", cliponaxis=False)
             fig.add_bar(x=line_monthly["Mês Texto"], y=line_monthly["Custos Diretos Pagos"], name="Custos diretos", marker_color="#D26A62",
                         text=line_monthly["Custos Diretos Pagos"].map(compact_money), textposition="outside", cliponaxis=False)
             fig.add_scatter(x=line_monthly["Mês Texto"], y=line_monthly["Resultado Direto de Caixa"], name="Resultado direto", mode="lines+markers+text",
                             line=dict(color=GREEN, width=3), text=line_monthly["Resultado Direto de Caixa"].map(compact_money), textposition="top center")
-            fig.update_layout(title=f"Movimento de caixa · {scope_text}", barmode="group")
+            fig.update_layout(title=f"Resultado direto por mês · {scope_text}", barmode="group")
             hide_value_axis(fig, "y")
             st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
         with c2:
             fig = go.Figure()
             fig.add_bar(x=line_monthly["Mês Texto"], y=line_monthly["Faturamento"], name="Faturamento", marker_color=NAVY,
                         text=line_monthly["Faturamento"].map(compact_money), textposition="outside", cliponaxis=False)
-            fig.add_scatter(x=line_monthly["Mês Texto"], y=line_monthly["Receitas Recebidas"], name="Recebido", mode="lines+markers+text",
+            fig.add_scatter(x=line_monthly["Mês Texto"], y=line_monthly["Receitas Recebidas"], name="Receita direta", mode="lines+markers+text",
                             line=dict(color=CYAN, width=3), text=line_monthly["Receitas Recebidas"].map(compact_money), textposition="top center")
             fig.update_layout(title="Faturamento x conversão em caixa")
             hide_value_axis(fig, "y")
@@ -1212,11 +1313,12 @@ if page == "Dashboard":
             hide_value_axis(fig, "x")
             st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
 
-        r_scope = rec_scope.copy()
-        secure_value = float(r_scope.loc[r_scope["_MATCH_METHOD"].isin(["Exata", "Similar"]), "_VALOR"].sum())
-        coverage = safe_div(secure_value, float(r_scope["_VALOR"].sum()))
+        direct_rows = period_filter(custos[custos["_LINHA_DIRETA"] == scope_choice], start_month, end_month)
+        revenue_count = len(direct_rows[(direct_rows["_EMPRESA_N"] == "RECEITA") & (direct_rows["_GRUPO_N"] == "RECEITAS OPERACIONAIS")])
+        cost_count = len(direct_rows[(direct_rows["_EMPRESA_N"] == "DESPESAS") & (direct_rows["_GRUPO_N"] == "SAIDAS OPERACIONAIS")])
         st.markdown(
-            f"<div class='scope-note'><b>Qualidade da classificação:</b> {pct(coverage)} das receitas desta linha foram associadas por correspondência exata ou similar entre cliente e faturamento. Custos administrativos compartilhados e rateios não são apresentados.</div>",
+            f"<div class='scope-note'><b>Fonte do resultado:</b> aba Centro de Custos, campo CENTRO DE CUSTOS = {scope_text.upper()}. "
+            f"Foram considerados {revenue_count:,} lançamentos de receita e {cost_count:,} lançamentos de custo; o campo de rateio foi ignorado.</div>".replace(",", "."),
             unsafe_allow_html=True,
         )
 
@@ -1225,7 +1327,17 @@ if page == "Dashboard":
 # LINHAS DE NEGÓCIO — SOMENTE DIRETORIA
 # =========================================================
 elif page == "Linhas de negócio" and is_director:
-    section_header("Comparativo das linhas de negócio", "Resultado direto por caixa; custos compartilhados permanecem apenas no consolidado", "Diretoria")
+    section_header("Comparativo das linhas de negócio", "Receitas e custos da aba Centro de Custos, sem utilização do rateio", "Diretoria")
+    direct_revenue_total = float(lines_table["Receitas Recebidas"].sum())
+    direct_cost_total = float(lines_table["Custos Diretos Pagos"].sum())
+    shared_costs = max(float(company_totals["Saídas Operacionais"]) - direct_cost_total, 0.0)
+    unclassified_revenue = max(float(company_totals["Receitas Operacionais"]) - direct_revenue_total, 0.0)
+    r1, r2, r3, r4 = st.columns(4)
+    with r1: card("Receitas diretas classificadas", brl(direct_revenue_total), "Soma dos quatro centros de custo", BLUE)
+    with r2: card("Custos diretos classificados", brl(direct_cost_total), "Soma dos quatro centros de custo", RED)
+    with r3: card("Custos compartilhados", brl(shared_costs), "Mantidos somente no consolidado", NAVY)
+    with r4: card("Receitas fora das quatro linhas", brl(unclassified_revenue), "Diferença para o total operacional", CYAN)
+
     cols = st.columns(4)
     for idx, row in lines_table.iterrows():
         with cols[idx % 4]:
@@ -1234,29 +1346,42 @@ elif page == "Linhas de negócio" and is_director:
     c1, c2 = st.columns(2)
     with c1:
         p = lines_table.sort_values("Receitas Recebidas")
-        fig = px.bar(p, x="Receitas Recebidas", y="Linha", orientation="h", color="Código", color_discrete_map=LINE_COLORS,
-                     title="Receitas recebidas por linha")
-        fig.update_traces(text=p["Receitas Recebidas"].map(compact_money), textposition="outside", cliponaxis=False)
-        fig.update_layout(showlegend=False); hide_value_axis(fig, "x")
+        fig = go.Figure(go.Bar(
+            x=p["Receitas Recebidas"], y=p["Linha"], orientation="h",
+            marker_color=[LINE_COLORS.get(code, BLUE) for code in p["Código"]],
+            text=p["Receitas Recebidas"].map(compact_money), textposition="outside", cliponaxis=False,
+            hovertemplate="%{y}<br>Receita direta: R$ %{x:,.2f}<extra></extra>",
+        ))
+        fig.update_layout(title="Receitas operacionais diretas por linha", showlegend=False); hide_value_axis(fig, "x")
         st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
     with c2:
         p = lines_table.sort_values("Margem Direta de Caixa")
-        fig = px.bar(p, x="Margem Direta de Caixa", y="Linha", orientation="h", color="Código", color_discrete_map=LINE_COLORS,
-                     title="Margem direta de caixa")
-        fig.update_traces(text=p["Margem Direta de Caixa"].map(pct), textposition="outside", cliponaxis=False)
-        fig.update_layout(showlegend=False); hide_value_axis(fig, "x")
+        fig = go.Figure(go.Bar(
+            x=p["Margem Direta de Caixa"], y=p["Linha"], orientation="h",
+            marker_color=[LINE_COLORS.get(code, BLUE) if value >= 0 else RED for code, value in zip(p["Código"], p["Margem Direta de Caixa"])],
+            text=p["Margem Direta de Caixa"].map(pct),
+            textposition=["outside" if value >= 0 else "inside" for value in p["Margem Direta de Caixa"]],
+            textfont_color=[DARK if value >= 0 else WHITE for value in p["Margem Direta de Caixa"]],
+            insidetextanchor="middle", cliponaxis=False,
+            hovertemplate="%{y}<br>Margem: %{x:.1%}<extra></extra>",
+        ))
+        fig.update_layout(title="Margem direta de caixa", showlegend=False); hide_value_axis(fig, "x")
         st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
 
-    view = lines_table.drop(columns=["Código"]).copy()
-    for c in ["Receitas Recebidas", "Custos Diretos Pagos", "Resultado Direto de Caixa", "Faturamento", "Inadimplência"]:
+    export_lines = lines_table.drop(columns=["Código"]).rename(columns={
+        "Receitas Recebidas": "Receitas Operacionais Diretas",
+        "Custos Diretos Pagos": "Custos Operacionais Diretos",
+    })
+    view = export_lines.copy()
+    for c in ["Receitas Operacionais Diretas", "Custos Operacionais Diretos", "Resultado Direto de Caixa", "Faturamento", "Inadimplência"]:
         view[c] = view[c].map(brl)
-    for c in ["Margem Direta de Caixa", "Margem de Contribuição Direta", "Conversão em Caixa", "Cobertura do Mapeamento"]:
+    for c in ["Margem Direta de Caixa", "Margem de Contribuição Direta", "Conversão em Caixa"]:
         view[c] = view[c].map(pct)
     st.dataframe(view, width="stretch", hide_index=True, height=280)
-    st.download_button("Exportar comparativo das linhas", dataframe_download(lines_table.drop(columns=["Código"]), "Linhas"),
+    st.download_button("Exportar comparativo das linhas", dataframe_download(export_lines, "Linhas"),
                        file_name=f"resultado_caixa_por_linha_{start_month}_{end_month}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    st.markdown("<div class='warning-note'><b>Leitura:</b> o resultado direto de cada linha não inclui áreas administrativas, diretoria, financeiro, fiscal, tecnologia ou outros centros compartilhados. Esses valores permanecem no consolidado da diretoria.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='scope-note'><b>Regra aplicada:</b> receitas operacionais menos saídas operacionais do próprio centro de custo. Financeiro, administrativo, diretoria, fiscal, tecnologia e demais centros compartilhados não são distribuídos entre as linhas.</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -1282,13 +1407,12 @@ elif page == "Recebimentos & inadimplência":
         st.plotly_chart(plot_layout(fig, 420), width="stretch", config={"displayModeBar": False})
     else:
         r1, r2, r3, r4 = st.columns(4)
-        with r1: card("Receitas recebidas", brl(line_totals["Receitas Recebidas"]), "Receitas atribuídas à linha", BLUE)
+        with r1: card("Receita operacional direta", brl(line_totals["Receitas Recebidas"]), "Centro de Custos · RECEITA", BLUE)
         with r2: card("Faturamento emitido", brl(line_totals["Faturamento"]), "Base comercial do período", NAVY)
-        with r3: card("Conversão em caixa", pct(line_totals["Conversão em Caixa"]), "Recebido ÷ faturado", TEAL)
-        coverage = safe_div(float(rec_scope.loc[rec_scope["_MATCH_METHOD"].isin(["Exata", "Similar"]), "_VALOR"].sum()), float(rec_scope["_VALOR"].sum()))
-        with r4: card("Cobertura do vínculo", pct(coverage), "Correspondência exata ou similar de clientes", CYAN)
+        with r3: card("Conversão em caixa", pct(line_totals["Conversão em Caixa"]), "Receita direta ÷ faturamento", TEAL)
+        with r4: card("Resultado direto", brl(line_totals["Resultado Direto de Caixa"]), "Receita direta menos custo direto", GREEN if line_totals["Resultado Direto de Caixa"] >= 0 else RED)
 
-    section_header("Inadimplência", "A base é opcional e pode ser carregada pela diretoria")
+    section_header("Inadimplência", "Relatório exportado do CRM de Cobrança")
     if inad_scope is None:
         st.info("A base de inadimplência ainda não foi carregada. Campos aceitos: Cliente, Valor vencido, Vencimento e Dias de atraso. Também são reconhecidos `Vencidos Corrigidos`, `Vencidos` e `Valor Original`.")
     elif inad_scope.empty:
@@ -1513,13 +1637,17 @@ elif page == "Custos diretos":
 # =========================================================
 # QUALIDADE E METODOLOGIA
 # =========================================================
-elif page == "Qualidade & metodologia":
-    section_header("Qualidade, segurança e metodologia", "Transparência sobre fontes, vínculos e limitações", "Governança")
+elif page == "Fontes & regras":
+    section_header("Fontes e regras de cálculo", "Origem dos valores exibidos no painel", "Governança")
+    direct_revenue_total = float(lines_table["Receitas Recebidas"].sum())
+    direct_cost_total = float(lines_table["Custos Diretos Pagos"].sum())
+    shared_costs = max(float(company_totals["Saídas Operacionais"]) - direct_cost_total, 0.0)
+    unclassified_revenue = max(float(company_totals["Receitas Operacionais"]) - direct_revenue_total, 0.0)
     q1, q2, q3, q4 = st.columns(4)
-    with q1: card("Cobertura das receitas por linha", pct(receipt_match_stats["coverage_value"]), "Valor associado por correspondência exata ou similar", TEAL)
-    with q2: card("Receitas por fallback", brl(receipt_match_stats["fallback_value"]), "Classificação inferida pelo tipo de recebimento", ORANGE)
-    with q3: card("Segurança ativa", "Sim" if user["secure"] == "Sim" else "Modo demonstração", "Controle de perfil por Streamlit Secrets", GREEN if user["secure"] == "Sim" else ORANGE)
-    with q4: card("Inadimplência integrada", "Sim" if inad is not None else "Não", inad_name if inad is not None else "Base opcional ainda não carregada", BLUE)
+    with q1: card("Receitas diretas", brl(direct_revenue_total), "Quatro centros de custo", BLUE)
+    with q2: card("Custos diretos", brl(direct_cost_total), "Quatro centros de custo", RED)
+    with q3: card("Custos compartilhados", brl(shared_costs), "Exclusivos do consolidado", NAVY)
+    with q4: card("Receita não classificada", brl(unclassified_revenue), "Fora das quatro linhas", CYAN)
 
     c1, c2 = st.columns(2)
     with c1:
@@ -1540,9 +1668,9 @@ elif page == "Qualidade & metodologia":
         ["Resultado operacional de caixa", "Receitas operacionais recebidas menos saídas operacionais pagas.", "Caixa"],
         ["EBITDA gerencial de caixa", "Resultado operacional de caixa com IRPJ e CSLL adicionados de volta.", "Caixa gerencial"],
         ["Margem de contribuição de caixa", "Receitas operacionais recebidas menos saídas variáveis pagas.", "Caixa gerencial"],
-        ["Resultado direto da linha", "Receitas recebidas atribuídas à linha menos custos pagos no centro de custo direto da linha.", "Caixa direto"],
+        ["Resultado direto da linha", "Receitas operacionais menos saídas operacionais do centro de custo direto da linha; rateio desconsiderado.", "Centro de Custos"],
         ["Custos compartilhados", "Não são exibidos aos gestores e permanecem apenas no consolidado da diretoria.", "Governança"],
-        ["Faturamento e meta", "Exibidos somente como indicadores comerciais de apoio; não formam o resultado de caixa.", "Competência"],
+        ["Faturamento e meta", "Indicadores comerciais separados do resultado financeiro realizado.", "Competência"],
         ["Inadimplência", "Saldo vencido da base opcional, classificado por linha quando possível.", "Carteira"],
     ], columns=["Indicador", "Definição", "Regime"])
     st.dataframe(methodology, width="stretch", hide_index=True, height=390)
@@ -1551,7 +1679,5 @@ elif page == "Qualidade & metodologia":
         "<div class='scope-note'><b>Acesso por gestor:</b> os perfis de Microtech, Locação, Vendas e Endoscopia visualizam apenas receitas recebidas, faturamento, produtos, clientes, inadimplência e custos diretos da própria linha. Não há comparação com outras linhas nem exposição de áreas compartilhadas.</div>",
         unsafe_allow_html=True,
     )
-    if user["secure"] != "Sim":
-        st.markdown("<div class='warning-note'><b>Antes da publicação:</b> copie `secrets.toml.example` para os segredos do Streamlit e cadastre um usuário por gestor. O modo demonstração não deve ser usado como controle de acesso em produção.</div>", unsafe_allow_html=True)
 
-st.caption("FIRST MEDICAL · Intelligence Dashboard · Controladoria · Indicadores de caixa e acesso por linha")
+st.caption("FIRST MEDICAL · Dashboard de Caixa · Centros de custo diretos · Acesso por perfil")
