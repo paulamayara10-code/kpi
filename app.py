@@ -83,10 +83,10 @@ st.markdown(
     [data-testid="stSidebar"] [role="radiogroup"] label {{ background:rgba(255,255,255,.045); margin-bottom:4px; border:1px solid rgba(255,255,255,.06); }}
     [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{ background:rgba(79,154,209,.22); border-color:rgba(185,217,240,.42); }}
     [data-testid="stPlotlyChart"] {{
-        background:linear-gradient(180deg,#FFFFFF 0%,#FBFDFF 100%); border:1px solid #DDE7F0;
-        border-radius:20px; padding:6px 9px; box-shadow:0 10px 28px rgba(7,27,51,.065); overflow:hidden;
+        background:linear-gradient(180deg,#FFFFFF 0%,#FCFEFF 100%); border:1px solid #D6E4EF;
+        border-radius:22px; padding:8px 10px; box-shadow:0 16px 34px rgba(7,27,51,.07); overflow:hidden;
     }}
-    [data-testid="stPlotlyChart"]:hover {{ box-shadow:0 14px 34px rgba(7,27,51,.09); transform:translateY(-1px); transition:.18s ease; }}
+    [data-testid="stPlotlyChart"]:hover {{ box-shadow:0 20px 40px rgba(7,27,51,.10); transform:translateY(-1px); transition:.18s ease; }}
     div[data-testid="stDataFrame"] {{ border:1px solid {BORDER}; border-radius:16px; overflow:hidden; background:white; }}
     div[data-testid="stDownloadButton"] button, div[data-testid="stButton"] button {{ border-radius:11px; font-weight:750; }}
 
@@ -99,9 +99,9 @@ st.markdown(
     .first-sidebar p {{ margin:12px 0 0 0; opacity:.78; font-size:.74rem; line-height:1.4; }}
 
     .dashboard-hero {{
-        position:relative; overflow:hidden; background:linear-gradient(118deg,{NAVY} 0%,#103E6A 66%,#2F78B7 132%);
-        color:white; border-radius:22px; padding:22px 27px; margin-bottom:14px;
-        box-shadow:0 13px 30px rgba(7,27,51,.16);
+        position:relative; overflow:hidden; background:linear-gradient(120deg,{NAVY} 0%,#0E3762 58%,#1B5D97 120%);
+        color:white; border-radius:24px; padding:24px 28px; margin-bottom:16px;
+        box-shadow:0 18px 38px rgba(7,27,51,.18);
     }}
     .dashboard-hero::after {{ content:""; position:absolute; width:320px; height:320px; border-radius:50%; right:-130px; top:-185px; background:rgba(255,255,255,.055); }}
     .hero-grid {{ position:relative; z-index:2; display:flex; align-items:center; justify-content:space-between; gap:20px; }}
@@ -125,9 +125,9 @@ st.markdown(
     .kpi-delta {{ display:inline-flex; width:max-content; margin-top:8px; border-radius:999px; padding:3px 7px; font-size:.67rem; font-weight:850; background:#EAF3FA; color:{BLUE}; }}
     .kpi-delta.bad {{ background:#E8F2FA; color:{NAVY_2}; }}
 
-    .section-head {{ display:flex; align-items:flex-end; justify-content:space-between; gap:15px; margin:22px 0 11px 0; padding:0 0 9px 2px; border-bottom:1px solid #DDE7F0; }}
+    .section-head {{ display:flex; align-items:center; justify-content:space-between; gap:15px; margin:22px 0 13px 0; padding:0 0 10px 2px; border-bottom:1px solid #DDE7F0; }}
     .section-head h3 {{ color:{NAVY}; font-size:1.13rem; font-weight:900; margin:0; letter-spacing:-.015em; }}
-    .section-head p {{ color:{GRAY}; font-size:.78rem; margin:4px 0 0 0; }}
+    .section-head p {{ color:{GRAY}; font-size:.78rem; margin:4px 0 0 0; display:none; }}
     .section-badge {{ display:inline-flex; align-items:center; border-radius:999px; padding:5px 9px; background:#EAF3FA; color:{BLUE}; font-size:.67rem; font-weight:900; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; }}
 
     .insight-grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:4px; }}
@@ -146,8 +146,12 @@ st.markdown(
     .login-brand p {{ color:#667085; margin:.45rem 0 0; font-size:.82rem; }}
     div[data-testid="stForm"] {{ background:#FFFFFF; border:1px solid #DCE5EE; border-radius:20px; padding:1.15rem 1.2rem 1.25rem; box-shadow:0 18px 50px rgba(7,27,51,.10); }}
     div[data-testid="stForm"] button {{ background:linear-gradient(90deg,#071B33,#1261A0); color:#FFFFFF; border:0; min-height:2.8rem; }}
-    .user-pill {{ display:flex; align-items:center; justify-content:space-between; gap:8px; background:#F4F7FA; border:1px solid {BORDER}; border-radius:12px; padding:9px 10px; margin:8px 0; }}
-    .user-pill b {{ color:{NAVY}; font-size:.78rem; }} .user-pill span {{ color:{GRAY}; font-size:.68rem; }}
+    .user-pill {{ display:flex; align-items:center; justify-content:space-between; gap:10px; background:linear-gradient(180deg,#F9FBFD 0%,#F2F6FA 100%); border:1px solid {BORDER}; border-radius:14px; padding:10px 12px; margin:8px 0 12px; box-shadow:0 6px 16px rgba(7,27,51,.05); }}
+    .user-pill .left {{ display:flex; align-items:center; gap:10px; }}
+    .user-pill .avatar {{ width:11px; height:11px; border-radius:50%; background:{BLUE}; box-shadow:0 0 0 5px rgba(18,97,160,.12); }}
+    .user-pill b {{ color:{NAVY}; font-size:.82rem; display:block; }}
+    .user-pill small {{ color:{GRAY}; font-size:.67rem; display:block; margin-top:2px; }}
+    .user-pill span {{ color:{BLUE}; font-size:.69rem; font-weight:800; }}
 
     [data-testid="stSidebar"] [role="radiogroup"] label {{ border-radius:10px; padding:3px 4px; }}
     [data-testid="stSidebar"] hr {{ margin:.85rem 0; }}
@@ -316,7 +320,7 @@ def section_header(title: str, subtitle: str = "", badge: str = "") -> None:
     st.markdown(
         f"""
         <div class="section-head">
-          <div><h3>{title}</h3><p>{subtitle}</p></div>{badge_html}
+          <div><h3>{title}</h3></div>{badge_html}
         </div>
         """,
         unsafe_allow_html=True,
@@ -371,7 +375,7 @@ def plot_layout(fig: go.Figure, height: int = 390, legend_bottom: bool = True) -
         tickfont=dict(color="#61758A", size=11), ticks="",
     )
     fig.update_yaxes(
-        title_text="", gridcolor="#EAF0F5", gridwidth=1, zeroline=False, automargin=True,
+        title_text="", showgrid=False, zeroline=False, automargin=True,
         showline=False, tickfont=dict(color="#61758A", size=11), ticks="",
     )
     fig.update_traces(
@@ -1388,7 +1392,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.markdown(
-        f"<div class='user-pill'><div><b>{user['nome']}</b><br><span>{user['email']}</span></div><span>{'Diretoria' if is_director else line_label(user['linha'])}</span></div>",
+        f"<div class='user-pill'><div class='left'><span class='avatar'></span><div><b>{user['nome']}</b><small>{'Acesso executivo' if is_director else 'Acesso por linha'}</small></div></div><span>{'Diretoria' if is_director else line_label(user['linha'])}</span></div>",
         unsafe_allow_html=True,
     )
     if secret_users() and st.button("Sair", width="stretch"):
@@ -1451,7 +1455,6 @@ with st.sidebar:
         scope_choice = st.selectbox("Escopo do painel", ["CONSOLIDADO"] + LINES, format_func=line_label)
     else:
         scope_choice = user["linha"] if user["linha"] in LINES else "VENDAS"
-        st.markdown(f"<div class='secure-note'><b>Visão restrita:</b> {line_label(scope_choice)}. Outras linhas e custos compartilhados não são exibidos.</div>", unsafe_allow_html=True)
 
     st.markdown("#### Navegação")
     pages = ["Dashboard", "Desempenho & metas", "Recebimentos & inadimplência", "Clientes", "Produtos", "Custos diretos"]
