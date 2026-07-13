@@ -72,7 +72,7 @@ st.markdown(
     <style>
     :root {{ --navy:{NAVY}; --blue:{BLUE}; --cyan:{CYAN}; --green:{GREEN}; --light:{LIGHT}; }}
     .stApp {{ background:{LIGHT}; }}
-    .block-container {{ max-width:1540px; padding-top:1.85rem !important; padding-bottom:2.3rem; }}
+    .block-container {{ max-width:1540px; padding-top:1.15rem !important; padding-bottom:1.25rem; }}
     [data-testid="stSidebar"] {{ background:linear-gradient(180deg,#071B33 0%,#0B2F55 100%); border-right:0; }}
     [data-testid="stSidebar"] .block-container {{ padding-top:1rem; }}
     [data-testid="stSidebar"] label, [data-testid="stSidebar"] p, [data-testid="stSidebar"] span {{ color:#EAF4FB; }}
@@ -85,7 +85,7 @@ st.markdown(
     [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{ background:rgba(79,154,209,.22); border-color:rgba(185,217,240,.42); }}
     [data-testid="stPlotlyChart"] {{
         background:linear-gradient(180deg,#FFFFFF 0%,#FCFEFF 100%); border:1px solid #D6E4EF;
-        border-radius:22px; padding:8px 10px; box-shadow:0 16px 34px rgba(7,27,51,.07); overflow:hidden;
+        border-radius:18px; padding:4px 7px; box-shadow:0 10px 24px rgba(7,27,51,.06); overflow:hidden;
     }}
     [data-testid="stPlotlyChart"]:hover {{ box-shadow:0 20px 40px rgba(7,27,51,.10); transform:translateY(-1px); transition:.18s ease; }}
     div[data-testid="stDataFrame"] {{ border:1px solid {BORDER}; border-radius:16px; overflow:hidden; background:white; }}
@@ -101,20 +101,20 @@ st.markdown(
 
     .dashboard-hero {{
         position:relative; overflow:hidden; background:linear-gradient(120deg,{NAVY} 0%,#0E3762 58%,#1B5D97 120%);
-        color:white; border-radius:24px; padding:29px 28px 25px; margin:7px 0 16px;
+        color:white; border-radius:22px; padding:23px 25px 20px; margin:4px 0 10px;
         box-shadow:0 18px 38px rgba(7,27,51,.18);
     }}
     .dashboard-hero::after {{ content:""; position:absolute; width:320px; height:320px; border-radius:50%; right:-130px; top:-185px; background:rgba(255,255,255,.055); }}
     .hero-grid {{ position:relative; z-index:2; display:flex; align-items:center; justify-content:space-between; gap:20px; }}
     .hero-brand {{ font-size:.72rem; font-weight:900; letter-spacing:.28em; color:#B9D9F0; text-transform:uppercase; }}
-    .dashboard-hero h1 {{ font-size:clamp(1.48rem,2.25vw,2.06rem); line-height:1.18; margin:9px 0 2px 0; letter-spacing:-.025em; padding-top:1px; }}
+    .dashboard-hero h1 {{ font-size:clamp(1.46rem,2.15vw,1.98rem); line-height:1.16; margin:7px 0 1px 0; letter-spacing:-.025em; padding-top:1px; }}
     .dashboard-hero p {{ margin:0; opacity:.82; font-size:.88rem; }}
     .hero-chips {{ display:flex; flex-wrap:wrap; gap:7px; justify-content:flex-end; }}
     .hero-chip {{ background:rgba(255,255,255,.11); border:1px solid rgba(255,255,255,.20); border-radius:999px; padding:7px 11px; font-size:.71rem; font-weight:800; white-space:nowrap; }}
 
     .kpi-card {{
-        background:linear-gradient(145deg,#FFFFFF 0%,#FBFDFF 100%); border:1px solid #DDE7F0; border-radius:19px; padding:16px 17px 15px 17px;
-        min-height:138px; height:100%; position:relative; overflow:hidden;
+        background:linear-gradient(145deg,#FFFFFF 0%,#FBFDFF 100%); border:1px solid #DDE7F0; border-radius:19px; padding:13px 15px 12px 15px;
+        min-height:118px; height:100%; position:relative; overflow:hidden;
         box-shadow:0 8px 24px rgba(7,27,51,.055); display:flex; flex-direction:column; justify-content:space-between;
     }}
     .kpi-card::after {{ content:""; position:absolute; width:70px; height:70px; border-radius:50%; right:-28px; top:-30px; background:var(--tone,#00A7B5); opacity:.10; }}
@@ -126,13 +126,13 @@ st.markdown(
     .kpi-delta {{ display:inline-flex; width:max-content; margin-top:8px; border-radius:999px; padding:3px 7px; font-size:.67rem; font-weight:850; background:#EAF3FA; color:{BLUE}; }}
     .kpi-delta.bad {{ background:#E8F2FA; color:{NAVY_2}; }}
 
-    .section-head {{ display:flex; align-items:center; justify-content:space-between; gap:15px; margin:22px 0 13px 0; padding:0 0 10px 2px; border-bottom:1px solid #DDE7F0; }}
+    .section-head {{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin:14px 0 8px 0; padding:0 0 7px 2px; border-bottom:1px solid #DDE7F0; }}
     .section-head h3 {{ color:{NAVY}; font-size:1.13rem; font-weight:900; margin:0; letter-spacing:-.015em; }}
     .section-head p {{ color:{GRAY}; font-size:.78rem; margin:4px 0 0 0; display:none; }}
     .section-badge {{ display:inline-flex; align-items:center; border-radius:999px; padding:5px 9px; background:#EAF3FA; color:{BLUE}; font-size:.67rem; font-weight:900; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; }}
 
-    .insight-grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:4px; }}
-    .insight-card {{ background:white; border:1px solid {BORDER}; border-left:4px solid {BLUE}; border-radius:14px; padding:12px 14px; box-shadow:0 3px 12px rgba(7,27,51,.035); }}
+    .insight-grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:2px; }}
+    .insight-card {{ background:white; border:1px solid {BORDER}; border-left:4px solid {BLUE}; border-radius:12px; padding:10px 12px; box-shadow:0 3px 10px rgba(7,27,51,.03); }}
     .insight-card.good {{ border-left-color:{TEAL}; }}
     .insight-card.critical {{ border-left-color:{CYAN}; }}
     .insight-card strong {{ color:{NAVY}; font-size:.84rem; display:block; margin-bottom:4px; }}
@@ -147,7 +147,7 @@ st.markdown(
     .login-brand p {{ color:#667085; margin:.45rem 0 0; font-size:.82rem; }}
     div[data-testid="stForm"] {{ background:#FFFFFF; border:1px solid #DCE5EE; border-radius:20px; padding:1.15rem 1.2rem 1.25rem; box-shadow:0 18px 50px rgba(7,27,51,.10); }}
     div[data-testid="stForm"] button {{ background:linear-gradient(90deg,#071B33,#1261A0); color:#FFFFFF; border:0; min-height:2.8rem; }}
-    .user-pill {{ display:flex; align-items:center; justify-content:space-between; gap:10px; background:linear-gradient(180deg,#F9FBFD 0%,#F2F6FA 100%); border:1px solid {BORDER}; border-radius:14px; padding:10px 12px; margin:8px 0 12px; box-shadow:0 6px 16px rgba(7,27,51,.05); }}
+    .user-pill {{ display:flex; align-items:center; justify-content:space-between; gap:10px; background:linear-gradient(180deg,#F9FBFD 0%,#F2F6FA 100%); border:1px solid {BORDER}; border-radius:13px; padding:8px 10px; margin:6px 0 8px; box-shadow:0 5px 14px rgba(7,27,51,.045); }}
     .user-pill .left {{ display:flex; align-items:center; gap:10px; }}
     .user-pill .avatar {{ width:11px; height:11px; border-radius:50%; background:{BLUE}; box-shadow:0 0 0 5px rgba(18,97,160,.12); }}
     .user-pill b {{ color:{NAVY}; font-size:.82rem; display:block; }}
@@ -155,7 +155,7 @@ st.markdown(
     .user-pill span {{ color:{BLUE}; font-size:.69rem; font-weight:800; }}
 
     [data-testid="stSidebar"] [role="radiogroup"] label {{ border-radius:10px; padding:3px 4px; }}
-    [data-testid="stSidebar"] hr {{ margin:.85rem 0; }}
+    [data-testid="stSidebar"] hr {{ margin:.55rem 0; }}
     [data-testid="stTabs"] button {{ font-weight:800; color:#475467; }}
     [data-testid="stTabs"] button[aria-selected="true"] {{ color:{NAVY}; border-bottom-color:{BLUE}; }}
 
@@ -166,17 +166,21 @@ st.markdown(
     table.clean-table {{ width:100%; border-collapse:separate; border-spacing:0; font-size:.76rem; color:#344054; }}
     table.clean-table thead th {{
         position:sticky; top:0; z-index:2; background:linear-gradient(180deg,#0B2F55 0%,#123E68 100%);
-        color:#FFFFFF; text-align:left; font-weight:850; padding:11px 12px; white-space:nowrap; border:0;
+        color:#FFFFFF; text-align:left; font-weight:850; padding:9px 11px; white-space:nowrap; border:0;
     }}
-    table.clean-table tbody td {{ padding:10px 12px; border:0; white-space:nowrap; background:#FFFFFF; }}
+    table.clean-table tbody td {{ padding:8px 11px; border:0; white-space:nowrap; background:#FFFFFF; }}
     table.clean-table tbody tr:nth-child(even) td {{ background:#F7FAFD; }}
     table.clean-table tbody tr:hover td {{ background:#EDF5FB; }}
-    .clean-table-note {{ color:#667085; font-size:.69rem; margin:6px 2px 0; }}
+    .clean-table-note {{ color:#667085; font-size:.69rem; margin:4px 2px 0; }}
+    div[data-testid="stVerticalBlock"] {{ gap:.72rem; }}
+    div[data-testid="stHorizontalBlock"] {{ gap:.85rem; }}
+    div[data-testid="stElementContainer"] {{ margin-bottom:0; }}
+    [data-testid="stExpander"] {{ margin:2px 0 4px; }}
 
     @media(max-width:900px) {{
       .block-container {{ padding-left:.75rem; padding-right:.75rem; }}
       .dashboard-hero {{ padding:18px; }} .hero-grid {{ align-items:flex-start; flex-direction:column; }} .hero-chips {{ justify-content:flex-start; }}
-      .kpi-card {{ min-height:125px; }} .insight-grid {{ grid-template-columns:1fr; }}
+      .kpi-card {{ min-height:110px; }} .insight-grid {{ grid-template-columns:1fr; }}
     }}
     </style>
     """,
@@ -358,10 +362,10 @@ def insight_cards(items: list[dict[str, str]]) -> None:
     st.markdown("".join(html), unsafe_allow_html=True)
 
 
-def plot_layout(fig: go.Figure, height: int = 390, legend_bottom: bool = True) -> go.Figure:
+def plot_layout(fig: go.Figure, height: int = 350, legend_bottom: bool = True) -> go.Figure:
     legend = (
         dict(
-            orientation="h", yanchor="top", y=-0.13, xanchor="left", x=0,
+            orientation="h", yanchor="top", y=-0.09, xanchor="left", x=0,
             bgcolor="rgba(239,246,252,.85)", bordercolor="#D9E6F0", borderwidth=1,
             font=dict(size=10, color="#365A78"), itemclick=False, itemdoubleclick=False,
         )
@@ -374,7 +378,7 @@ def plot_layout(fig: go.Figure, height: int = 390, legend_bottom: bool = True) -
     )
     fig.update_layout(
         height=height,
-        margin=dict(l=20, r=76, t=96, b=70 if legend_bottom else 30),
+        margin=dict(l=16, r=58, t=78, b=50 if legend_bottom else 22),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#FBFDFF",
         font=dict(family="Arial", color="#344054", size=12),
@@ -1624,7 +1628,7 @@ if page == "Dashboard":
                              company_monthly["Resultado Operacional de Caixa"].map(compact_money), color=NAVY)
             fig.update_layout(title="Movimento operacional de caixa", barmode="group")
             hide_value_axis(fig, "y")
-            st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 365), width="stretch", config={"displayModeBar": False})
         with c2:
             bridge_values = [
                 company_totals["Receitas Operacionais"], -company_totals["Saídas Variáveis"],
@@ -1640,7 +1644,7 @@ if page == "Dashboard":
             ))
             bridge.update_layout(title="Ponte do resultado operacional de caixa")
             hide_value_axis(bridge, "y")
-            st.plotly_chart(plot_layout(bridge, 430, False), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(bridge, 365, False), width="stretch", config={"displayModeBar": False})
 
         section_header("Resultado por linha de negócio", "Comparativo direto", "Sem rateio")
         dash_selected_codes = st.multiselect(
@@ -1650,10 +1654,10 @@ if page == "Dashboard":
         l1, l2 = st.columns([1.05, 1.25])
         with l1:
             fig = line_result_lollipop(dashboard_lines, "Resultado direto por linha")
-            st.plotly_chart(plot_layout(fig, 405, False), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 350, False), width="stretch", config={"displayModeBar": False})
         with l2:
             fig = line_revenue_cost_dumbbell(dashboard_lines, "Receitas x despesas diretas")
-            st.plotly_chart(plot_layout(fig, 405), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 350), width="stretch", config={"displayModeBar": False})
 
         section_header("Desempenho comercial", "Realizado, meta e projeção")
         s1, s2, s3, s4 = st.columns(4)
@@ -1680,7 +1684,7 @@ if page == "Dashboard":
         add_point_labels(perf_fig, commercial_monthly["Mês Texto"], commercial_monthly["Meta"], commercial_monthly["Meta"].map(compact_money), color=NAVY)
         perf_fig.update_layout(title="Faturamento realizado x meta mensal")
         hide_value_axis(perf_fig, "y")
-        st.plotly_chart(plot_layout(perf_fig, 410), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(plot_layout(perf_fig, 350), width="stretch", config={"displayModeBar": False})
 
         section_header("Clientes e custos que formam o resultado", "Abertura restrita à linha selecionada")
         c1, c2 = st.columns(2)
@@ -1693,7 +1697,7 @@ if page == "Dashboard":
             fig.update_traces(marker_color=TEAL, text=p["_VALOR"].map(compact_money), textposition="outside", cliponaxis=False,
                               hovertemplate="%{customdata[0]}<br>Faturamento: R$ %{x:,.2f}<extra></extra>")
             hide_value_axis(fig, "x")
-            st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 370, False), width="stretch", config={"displayModeBar": False})
         with c2:
             top_cost = cost_scope.groupby("PAI", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(10)
             top_cost["Natureza"] = top_cost["PAI"].map(lambda x: short_label(x, 36))
@@ -1702,7 +1706,7 @@ if page == "Dashboard":
             fig.update_traces(marker_color=BLUE, text=p["_VALOR"].map(compact_money), textposition="outside", cliponaxis=False,
                               hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
             hide_value_axis(fig, "x")
-            st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 370, False), width="stretch", config={"displayModeBar": False})
 
     else:
         t = line_totals
@@ -1761,7 +1765,7 @@ if page == "Dashboard":
             )
             fig.update_layout(title="Resultado mensal de caixa", barmode="group")
             hide_value_axis(fig, "y")
-            st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 365), width="stretch", config={"displayModeBar": False})
 
         with c2:
             fig = go.Figure()
@@ -1782,7 +1786,7 @@ if page == "Dashboard":
             )
             fig.update_layout(title="Faturamento x meta")
             hide_value_axis(fig, "y")
-            st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 365), width="stretch", config={"displayModeBar": False})
 
         section_header("Desempenho comercial", badge=scope_text)
         s1, s2, s3, s4 = st.columns(4)
@@ -1824,7 +1828,7 @@ if page == "Dashboard":
                     hovertemplate="%{customdata[0]}<br>Faturamento: R$ %{x:,.2f}<extra></extra>",
                 )
                 hide_value_axis(fig, "x")
-                st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
+                st.plotly_chart(plot_layout(fig, 370, False), width="stretch", config={"displayModeBar": False})
 
         with c4:
             top_cost = (
@@ -1846,7 +1850,7 @@ if page == "Dashboard":
                     hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>",
                 )
                 hide_value_axis(fig, "x")
-                st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
+                st.plotly_chart(plot_layout(fig, 370, False), width="stretch", config={"displayModeBar": False})
 
 
 # =========================================================
@@ -1911,7 +1915,7 @@ elif page == "Desempenho & metas":
         add_point_labels(fig, perf_monthly["Mês Texto"], perf_monthly["Meta"], perf_monthly["Meta"].map(compact_money), color=NAVY)
         fig.update_layout(title="Faturamento x meta mensal")
         hide_value_axis(fig, "y")
-        st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(plot_layout(fig, 365), width="stretch", config={"displayModeBar": False})
     with c2:
         att = perf_monthly[perf_monthly["Atingimento"] > 0].copy()
         colors = [BLUE if value >= 1 else CYAN for value in att["Atingimento"]]
@@ -1923,7 +1927,7 @@ elif page == "Desempenho & metas":
         fig.add_hline(y=1, line_dash="dot", line_color=NAVY, line_width=2)
         fig.update_layout(title="Atingimento mensal")
         hide_value_axis(fig, "y")
-        st.plotly_chart(plot_layout(fig, 430, False), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(plot_layout(fig, 365, False), width="stretch", config={"displayModeBar": False})
 
     if is_director and scope_choice == "CONSOLIDADO":
         section_header("Desempenho por linha", "Comparação comercial e financeira", "Diretoria")
@@ -1949,7 +1953,7 @@ elif page == "Desempenho & metas":
         fig.add_vline(x=1, line_dash="dot", line_color=NAVY, line_width=2)
         fig.update_layout(title="Atingimento da meta por linha", showlegend=False)
         hide_value_axis(fig, "x")
-        st.plotly_chart(plot_layout(fig, 390, False), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(plot_layout(fig, 335, False), width="stretch", config={"displayModeBar": False})
 
         score_view = score.copy()
         for col in ["Faturamento", "Meta", "Desvio da Meta", "Receitas Recebidas", "Resultado Direto de Caixa", "Inadimplência"]:
@@ -1987,7 +1991,7 @@ elif page == "Desempenho & metas":
         fig.add_vline(x=1, line_dash="dot", line_color=NAVY, line_width=2)
         fig.update_layout(title="Atingimento por vendedor", showlegend=False)
         hide_value_axis(fig, "x")
-        st.plotly_chart(plot_layout(fig, max(390, 42 * len(seller_plot)), False), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(plot_layout(fig, min(max(320, 34 * len(seller_plot)), 470), False), width="stretch", config={"displayModeBar": False})
 
         seller_view = seller_perf[["Vendedor", "Faturamento", "Meta", "Atingimento", "Desvio", "Status"]].copy()
         seller_export = seller_view.copy()
@@ -2036,10 +2040,10 @@ elif page == "Linhas de negócio" and is_director:
     c1, c2 = st.columns([1.2, 1])
     with c1:
         fig = line_revenue_cost_dumbbell(lines_view, "Receitas x despesas por linha")
-        st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(plot_layout(fig, 365), width="stretch", config={"displayModeBar": False})
     with c2:
         fig = line_result_lollipop(lines_view, "Resultado direto por linha")
-        st.plotly_chart(plot_layout(fig, 430, False), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(plot_layout(fig, 365, False), width="stretch", config={"displayModeBar": False})
     export_lines = lines_view.drop(columns=["Código"]).rename(columns={
         "Receitas Recebidas": "Receitas Operacionais Diretas",
         "Custos Diretos Pagos": "Custos Operacionais Diretos",
@@ -2081,7 +2085,7 @@ elif page == "Recebimentos & inadimplência":
                          company_monthly["Recebimento Realizado"].map(compact_money), color=NAVY)
         fig.update_layout(title="Recebimento previsto x realizado")
         hide_value_axis(fig, "y")
-        st.plotly_chart(plot_layout(fig, 420), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(plot_layout(fig, 355), width="stretch", config={"displayModeBar": False})
     else:
         r1, r2, r3, r4 = st.columns(4)
         with r1: card("Receita operacional direta", brl(line_totals["Receitas Recebidas"]), "Centro de Custos · RECEITA", BLUE)
@@ -2130,7 +2134,7 @@ elif page == "Recebimentos & inadimplência":
             fig = px.bar(aging, x="_FAIXA", y="_VALOR_VENCIDO", title="Aging da inadimplência")
             fig.update_traces(marker_color=BLUE, text=aging["_VALOR_VENCIDO"].map(compact_money), textposition="outside", cliponaxis=False)
             hide_value_axis(fig, "y")
-            st.plotly_chart(plot_layout(fig, 400, False), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 345, False), width="stretch", config={"displayModeBar": False})
         with c2:
             cli = inad_page.groupby("_CLIENTE", as_index=False)["_VALOR_VENCIDO"].sum().sort_values("_VALOR_VENCIDO", ascending=False).head(inad_top_n)
             cli["Nome"] = cli["_CLIENTE"].map(lambda x: short_label(x, 38))
@@ -2139,7 +2143,7 @@ elif page == "Recebimentos & inadimplência":
             fig.update_traces(marker_color=NAVY, text=p["_VALOR_VENCIDO"].map(compact_money), textposition="outside", cliponaxis=False,
                               hovertemplate="%{customdata[0]}<br>Vencido: R$ %{x:,.2f}<extra></extra>")
             hide_value_axis(fig, "x")
-            st.plotly_chart(plot_layout(fig, 400, False), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 345, False), width="stretch", config={"displayModeBar": False})
 
         if is_director and inad_meta and inad_meta.get("resumo_gerentes"):
             crm_summary = pd.DataFrame(inad_meta["resumo_gerentes"])
@@ -2212,7 +2216,7 @@ elif page == "Clientes":
             fig.update_traces(marker_color=BLUE, text=p["Faturamento"].map(compact_money), textposition="outside", cliponaxis=False,
                               hovertemplate="%{customdata[0]}<br>Faturamento: R$ %{x:,.2f}<extra></extra>")
             hide_value_axis(fig, "x")
-            st.plotly_chart(plot_layout(fig, 540, False), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 410, False), width="stretch", config={"displayModeBar": False})
         with p2:
             top = received.sort_values("Recebido", ascending=False).head(top_n).copy()
             top["Nome"] = top["Cliente Recebimento"].map(lambda x: short_label(x, 38)) if not top.empty else []
@@ -2221,7 +2225,7 @@ elif page == "Clientes":
             fig.update_traces(marker_color=TEAL, text=p["Recebido"].map(compact_money), textposition="outside", cliponaxis=False,
                               hovertemplate="%{customdata[0]}<br>Recebido: R$ %{x:,.2f}<extra></extra>")
             hide_value_axis(fig, "x")
-            st.plotly_chart(plot_layout(fig, 540, False), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 410, False), width="stretch", config={"displayModeBar": False})
 
         view = billed.head(100).rename(columns={client_col: "Cliente"}).copy()
         view["Faturamento"] = view["Faturamento"].map(brl)
@@ -2295,14 +2299,14 @@ elif page == "Produtos":
                     fig.update_traces(marker_color=BLUE, text=top["Faturamento"].map(compact_money), textposition="outside", cliponaxis=False,
                                       hovertemplate="%{customdata[0]}<br>Faturamento: R$ %{x:,.2f}<extra></extra>")
                     hide_value_axis(fig, "x")
-                    st.plotly_chart(plot_layout(fig, 520, False), width="stretch", config={"displayModeBar": False})
+                    st.plotly_chart(plot_layout(fig, 345, False), width="stretch", config={"displayModeBar": False})
                 with c2:
                     qty_top = products.sort_values("Quantidade", ascending=False).head(top_n).sort_values("Quantidade")
                     qty_top["Produto"] = qty_top["_PRODUTO"].map(lambda x: short_label(x, 34))
                     fig = px.bar(qty_top, x="Quantidade", y="Produto", orientation="h", title="Produtos por volume")
                     fig.update_traces(marker_color=TEAL, text=qty_top["Quantidade"].map(lambda v: f"{v:,.0f}".replace(",", ".")), textposition="outside", cliponaxis=False)
                     hide_value_axis(fig, "x")
-                    st.plotly_chart(plot_layout(fig, 520, False), width="stretch", config={"displayModeBar": False})
+                    st.plotly_chart(plot_layout(fig, 345, False), width="stretch", config={"displayModeBar": False})
 
                 table = products.rename(columns={"_PRODUTO": "Produto"})[["Produto", "Faturamento", "Participação", "Quantidade", "Preço médio", "Clientes", "Notas"]].copy()
                 table_view = table.copy()
@@ -2414,7 +2418,7 @@ elif page == "Centro de custos":
             add_point_labels(fig, monthly["Mês"], monthly["Saldo"], monthly["Saldo"].map(compact_money), color=NAVY)
             fig.update_layout(title="Movimento mensal por centro de custos", barmode="group")
             hide_value_axis(fig, "y")
-            st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+            st.plotly_chart(plot_layout(fig, 365), width="stretch", config={"displayModeBar": False})
 
         with c2:
             by_department = (
@@ -2458,7 +2462,7 @@ elif page == "Centro de custos":
             hide_value_axis(fig, "x")
             fig.update_yaxes(categoryorder="array", categoryarray=by_department["Departamento gráfico"].tolist())
             st.plotly_chart(
-                plot_layout(fig, max(440, 54 * len(by_department)), True),
+                plot_layout(fig, min(max(320, 40 * len(by_department)), 500), True),
                 width="stretch",
                 config={"displayModeBar": False},
             )
@@ -2475,7 +2479,7 @@ elif page == "Centro de custos":
                 fig.update_traces(marker_color=BLUE, text=revenues["_VALOR"].map(compact_money), textposition="outside", cliponaxis=False,
                                   hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
                 hide_value_axis(fig, "x")
-                st.plotly_chart(plot_layout(fig, 460, False), width="stretch", config={"displayModeBar": False})
+                st.plotly_chart(plot_layout(fig, 380, False), width="stretch", config={"displayModeBar": False})
         with p2:
             expenses = (
                 cc_base[cc_base["Movimento"] == "Despesa"].groupby("PAI", as_index=False)["_VALOR"].sum()
@@ -2487,7 +2491,7 @@ elif page == "Centro de custos":
                 fig.update_traces(marker_color=RED, text=expenses["_VALOR"].map(compact_money), textposition="outside", cliponaxis=False,
                                   hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
                 hide_value_axis(fig, "x")
-                st.plotly_chart(plot_layout(fig, 460, False), width="stretch", config={"displayModeBar": False})
+                st.plotly_chart(plot_layout(fig, 380, False), width="stretch", config={"displayModeBar": False})
 
         detail = cc_base[["_MES", "Departamento", "Movimento", "Classificação", "GRUPO", "PAI", party_col, "_VALOR"]].copy()
         detail["Mês"] = detail["_MES"].map(month_label)
