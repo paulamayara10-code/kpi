@@ -7,6 +7,7 @@ import re
 import unicodedata
 from pathlib import Path
 from typing import Iterable
+from difflib import SequenceMatcher
 
 import numpy as np
 import pandas as pd
@@ -14,7 +15,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from openpyxl import load_workbook
-from rapidfuzz import fuzz, process
 
 
 # =========================================================
@@ -57,6 +57,14 @@ LINE_COLORS = {
     "VENDAS": "#1B7F5A",
     "ENDOSCOPIA": "#6E55A3",
 }
+
+MANAGER_LINE_MAP = {
+    "CELSO": "MICROTECH",
+    "RENATO": "VENDAS",
+    "AMAURI": "LOCACAO",
+    "RONALDO": "ENDOSCOPIA",
+}
+LINE_MANAGER_MAP = {line: manager for manager, line in MANAGER_LINE_MAP.items()}
 
 st.markdown(
     f"""
@@ -209,6 +217,33 @@ def pct(value: float) -> str:
 
 def safe_div(a: float, b: float) -> float:
     return float(a / b) if b not in (0, None) and not pd.isna(b) else 0.0
+
+
+def token_similarity(a: str, b: str) -> float:
+    a_tokens = " ".join(sorted(set(norm(a).split())))
+    b_tokens = " ".join(sorted(set(norm(b).split())))
+    return SequenceMatcher(None, a_tokens, b_tokens).ratio() * 100
+
+
+def best_match(query: str, choices: list[str], cutoff: float = 88.0) -> tuple[str | None, float]:
+    best_choice = None
+    best_score = 0.0
+    for choice in choices:
+        score = token_similarity(query, choice)
+        if score > best_score:
+            best_choice, best_score = choice, score
+    return (best_choice, best_score) if best_choice is not None and best_score >= cutoff else (None, 0.0)
+
+
+def to_datetime_mixed(series: pd.Series) -> pd.Series:
+    out = pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
+    numeric = pd.to_numeric(series, errors="coerce")
+    mask_num = numeric.notna() & numeric.between(20000, 80000)
+    if mask_num.any():
+        out.loc[mask_num] = pd.to_datetime(numeric.loc[mask_num], unit="D", origin="1899-12-30", errors="coerce")
+    if (~mask_num).any():
+        out.loc[~mask_num] = pd.to_datetime(series.loc[~mask_num], errors="coerce", dayfirst=True)
+    return out
 
 
 def month_label(period: pd.Period) -> str:
@@ -422,7 +457,12 @@ def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     ]:
         if col in fat.columns:
             fat[col] = fat[col].fillna("Não informado").astype(str).str.strip()
-    fat["_LINHA"] = fat.apply(classify_billing_line, axis=1)
+    fallback_line = fat.apply(classify_billing_line, axis=1)
+    if "GERENTE" in fat.columns:
+        manager_line = fat["GERENTE"].map(norm).map(MANAGER_LINE_MAP)
+        fat["_LINHA"] = manager_line.where(manager_line.notna(), fallback_line)
+    else:
+        fat["_LINHA"] = fallback_line
     client_col = "NOME DO CLIENTE" if "NOME DO CLIENTE" in fat.columns else "CLIENTE"
     fat["_CLIENT_KEY"] = fat[client_col].map(client_key)
     fat["_TIPO_CAIXA"] = np.where(
@@ -546,8 +586,8 @@ def assign_receipt_lines(receitas: pd.DataFrame, fat: pd.DataFrame, threshold: f
             if (key, tipo) in line_map:
                 cache[(key, tipo)] = (key, 100.0, "Exata")
             elif key and tipo_choices:
-                match = process.extractOne(key, tipo_choices, scorer=fuzz.token_set_ratio, score_cutoff=threshold)
-                cache[(key, tipo)] = (match[0], float(match[1]), "Similar") if match else (None, 0.0, "Fallback")
+                matched, score = best_match(key, tipo_choices, cutoff=threshold)
+                cache[(key, tipo)] = (matched, float(score), "Similar") if matched else (None, 0.0, "Fallback")
             else:
                 cache[(key, tipo)] = (None, 0.0, "Fallback")
 
@@ -577,24 +617,56 @@ def assign_receipt_lines(receitas: pd.DataFrame, fat: pd.DataFrame, threshold: f
 
 
 @st.cache_data(show_spinner=False)
-def read_optional_table(file_bytes: bytes, filename: str) -> pd.DataFrame:
+def read_optional_table(file_bytes: bytes, filename: str) -> tuple[pd.DataFrame, dict[str, object]]:
+    metadata: dict[str, object] = {"origem": filename, "sheet": ""}
     if filename.lower().endswith(".csv"):
         try:
-            return clean_columns(pd.read_csv(io.BytesIO(file_bytes), sep=None, engine="python", encoding="utf-8-sig"))
+            df = clean_columns(pd.read_csv(io.BytesIO(file_bytes), sep=None, engine="python", encoding="utf-8-sig"))
         except UnicodeDecodeError:
-            return clean_columns(pd.read_csv(io.BytesIO(file_bytes), sep=None, engine="python", encoding="latin1"))
-    return clean_columns(pd.read_excel(io.BytesIO(file_bytes), sheet_name=0, engine="openpyxl"))
+            df = clean_columns(pd.read_csv(io.BytesIO(file_bytes), sep=None, engine="python", encoding="latin1"))
+        metadata["sheet"] = "CSV"
+        return df, metadata
+
+    xls = pd.ExcelFile(io.BytesIO(file_bytes), engine="openpyxl")
+    normalized = {norm(s): s for s in xls.sheet_names}
+    detail_sheet = normalized.get("TITULOS DETALHADOS") or normalized.get("TITULOS") or xls.sheet_names[0]
+    df = clean_columns(pd.read_excel(io.BytesIO(file_bytes), sheet_name=detail_sheet, engine="openpyxl"))
+    metadata["sheet"] = detail_sheet
+
+    resumo_sheet = normalized.get("RESUMO")
+    if resumo_sheet:
+        resumo = clean_columns(pd.read_excel(io.BytesIO(file_bytes), sheet_name=resumo_sheet, engine="openpyxl"))
+        gerente_col = optional_col(resumo, ["Gerente", "Gestor"])
+        valor_col = optional_col(resumo, ["Valor", "Saldo Vencido", "Vencidos Corrigidos"])
+        clientes_col = optional_col(resumo, ["Clientes"])
+        titulos_col = optional_col(resumo, ["Titulos", "Títulos"])
+        atraso_col = optional_col(resumo, ["Maior atraso", "Maior Atraso"])
+        if gerente_col and valor_col:
+            resumo_out = pd.DataFrame({
+                "Gerente": resumo[gerente_col].fillna("Sem gerente").astype(str).str.strip(),
+                "Valor": to_number(resumo[valor_col]),
+                "Clientes": to_number(resumo[clientes_col]).astype(int) if clientes_col else 0,
+                "Títulos": to_number(resumo[titulos_col]).astype(int) if titulos_col else 0,
+                "Maior atraso": to_number(resumo[atraso_col]).astype(int) if atraso_col else 0,
+            })
+            resumo_out["Linha"] = resumo_out["Gerente"].map(norm).map(MANAGER_LINE_MAP).fillna("NAO CLASSIFICADA")
+            metadata["resumo_gerentes"] = resumo_out.to_dict("records")
+    return df, metadata
 
 
 @st.cache_data(show_spinner=False)
-def prepare_inadimplencia(file_bytes: bytes, filename: str, fat: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str]]:
-    df = read_optional_table(file_bytes, filename)
-    client_col = optional_col(df, ["Nome do Cliente", "Cliente", "Razão Social", "Razao Social", "Nome", "N Fantasia"])
-    value_col = optional_col(df, ["Vencidos Corrigidos", "Vencidos", "Saldo Vencido", "Valor Vencido", "Valor Original", "Saldo", "Valor"])
-    due_col = optional_col(df, ["Vencimento", "Vencto", "Data Vencimento", "Venc. Real"])
+def prepare_inadimplencia(file_bytes: bytes, filename: str, fat: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, object]]:
+    df, source_meta = read_optional_table(file_bytes, filename)
+    client_col = optional_col(df, ["Nome do Cliente", "Cliente", "Razão Social", "Razao Social", "Nome", "N Fantasia", "Codigo-Lj-Nome do Cliente"])
+    value_col = optional_col(df, [
+        "Tit Vencidos Valor Corrigido", "Vencidos Corrigidos", "Tit Vencidos Valor Atual",
+        "Vencidos", "Saldo Vencido", "Valor Vencido", "Valor Original", "Saldo", "Valor"
+    ])
+    due_col = optional_col(df, ["Vencto Real", "Vencimento", "Vencto Titulo", "Vencto", "Data Vencimento", "Venc. Real"])
     days_col = optional_col(df, ["Dias Atraso", "Dias em Atraso", "Atraso"])
     line_col = optional_col(df, ["Linha", "Linha de Negócio", "Segmento", "Centro de Custos"])
-    title_col = optional_col(df, ["Prf-Numero-Parcela", "Título", "Titulo", "Documento", "Nota Fiscal", "NF"])
+    manager_col = optional_col(df, ["Gerente", "Gestor", "Responsável", "Responsavel"])
+    title_col = optional_col(df, ["Prf-Numero Parcela", "Prf-Numero-Parcela", "Título", "Titulo", "Documento", "Nota Fiscal", "NF"])
     if client_col is None or value_col is None:
         raise ValueError("A base de inadimplência precisa conter pelo menos Cliente e Valor vencido.")
 
@@ -602,50 +674,65 @@ def prepare_inadimplencia(file_bytes: bytes, filename: str, fat: pd.DataFrame) -
     x["_CLIENTE"] = x[client_col].fillna("Não informado").astype(str).str.strip()
     x["_CLIENT_KEY"] = x["_CLIENTE"].map(client_key)
     x["_VALOR_VENCIDO"] = to_number(x[value_col])
-    x["_VENCIMENTO"] = pd.to_datetime(x[due_col], errors="coerce", dayfirst=True) if due_col else pd.NaT
+    x["_VENCIMENTO"] = to_datetime_mixed(x[due_col]) if due_col else pd.NaT
     if days_col:
         x["_DIAS_ATRASO"] = to_number(x[days_col]).astype(int)
     elif due_col:
         x["_DIAS_ATRASO"] = (pd.Timestamp.today().normalize() - x["_VENCIMENTO"]).dt.days.fillna(0).clip(lower=0).astype(int)
     else:
         x["_DIAS_ATRASO"] = 0
-    if due_col:
-        x["_MES"] = x["_VENCIMENTO"].dt.to_period("M")
-    else:
-        x["_MES"] = pd.Period(pd.Timestamp.today(), freq="M")
+    x["_MES"] = x["_VENCIMENTO"].dt.to_period("M") if due_col else pd.Period(pd.Timestamp.today(), freq="M")
     x["_TITULO"] = x[title_col].fillna("").astype(str) if title_col else ""
 
-    if line_col:
+    manager_map = (
+        fat.groupby(["_CLIENT_KEY", "GERENTE", "_LINHA"], as_index=False)["_VALOR"].sum()
+        .sort_values("_VALOR", ascending=False).drop_duplicates("_CLIENT_KEY")
+        if "GERENTE" in fat.columns else pd.DataFrame(columns=["_CLIENT_KEY", "GERENTE", "_LINHA"])
+    )
+    choices = manager_map["_CLIENT_KEY"].drop_duplicates().tolist()
+    manager_by_key = dict(zip(manager_map["_CLIENT_KEY"], manager_map["GERENTE"]))
+    line_by_key = dict(zip(manager_map["_CLIENT_KEY"], manager_map["_LINHA"]))
+
+    if manager_col:
+        x["_GERENTE"] = x[manager_col].fillna("Sem gerente").astype(str).str.strip()
+        x["_LINHA"] = x["_GERENTE"].map(norm).map(MANAGER_LINE_MAP).fillna("NAO CLASSIFICADA")
+    elif line_col:
         raw_line = x[line_col].map(norm)
-        mapped = np.select(
+        x["_LINHA"] = np.select(
             [raw_line.str.contains("MICROTECH"), raw_line.str.contains("ENDOSCOPIA"), raw_line.str.contains("LOCACAO"), raw_line.str.contains("VENDA")],
-            ["MICROTECH", "ENDOSCOPIA", "LOCACAO", "VENDAS"],
-            default="NAO CLASSIFICADA",
+            ["MICROTECH", "ENDOSCOPIA", "LOCACAO", "VENDAS"], default="NAO CLASSIFICADA"
         )
-        x["_LINHA"] = mapped
+        x["_GERENTE"] = x["_LINHA"].map(LINE_MANAGER_MAP).fillna("Sem gerente")
     else:
-        dominant = (
-            fat.groupby(["_CLIENT_KEY", "_LINHA"], as_index=False)["_VALOR"].sum()
-            .sort_values("_VALOR", ascending=False).drop_duplicates("_CLIENT_KEY")
-        )
-        choices = dominant["_CLIENT_KEY"].drop_duplicates().tolist()
-        mp = dict(zip(dominant["_CLIENT_KEY"], dominant["_LINHA"]))
-        cache: dict[str, str] = {}
+        cache: dict[str, tuple[str, str, str]] = {}
         for key in x["_CLIENT_KEY"].drop_duplicates():
-            if key in mp:
-                cache[key] = mp[key]
+            if key in line_by_key:
+                cache[key] = (manager_by_key.get(key, "Sem gerente"), line_by_key.get(key, "NAO CLASSIFICADA"), "Exata")
             elif key:
-                match = process.extractOne(key, choices, scorer=fuzz.token_set_ratio, score_cutoff=88)
-                cache[key] = mp.get(match[0], "NAO CLASSIFICADA") if match else "NAO CLASSIFICADA"
+                matched, _score = best_match(key, choices, cutoff=88)
+                cache[key] = (
+                    manager_by_key.get(matched, "Sem gerente") if matched else "Sem gerente",
+                    line_by_key.get(matched, "NAO CLASSIFICADA") if matched else "NAO CLASSIFICADA",
+                    "Similar" if matched else "Não classificada",
+                )
             else:
-                cache[key] = "NAO CLASSIFICADA"
-        x["_LINHA"] = x["_CLIENT_KEY"].map(cache).fillna("NAO CLASSIFICADA")
+                cache[key] = ("Sem gerente", "NAO CLASSIFICADA", "Não classificada")
+        x["_GERENTE"] = x["_CLIENT_KEY"].map(lambda k: cache.get(k, ("Sem gerente", "NAO CLASSIFICADA", "Não classificada"))[0])
+        x["_LINHA"] = x["_CLIENT_KEY"].map(lambda k: cache.get(k, ("Sem gerente", "NAO CLASSIFICADA", "Não classificada"))[1])
+        x["_MATCH_GERENTE"] = x["_CLIENT_KEY"].map(lambda k: cache.get(k, ("Sem gerente", "NAO CLASSIFICADA", "Não classificada"))[2])
 
     x = x[(x["_VALOR_VENCIDO"] > 0) & ((x["_DIAS_ATRASO"] > 0) | x["_VENCIMENTO"].isna())].copy()
     x["_FAIXA"] = pd.cut(
-        x["_DIAS_ATRASO"], bins=[-1, 30, 60, 90, 10**9], labels=["Até 30 dias", "31 a 60 dias", "61 a 90 dias", "Acima de 90 dias"]
+        x["_DIAS_ATRASO"], bins=[-1, 30, 60, 90, 10**9],
+        labels=["Até 30 dias", "31 a 60 dias", "61 a 90 dias", "Acima de 90 dias"]
     ).astype(str)
-    meta = {"cliente": client_col, "valor": value_col, "vencimento": due_col or "Não disponível", "linha": line_col or "Mapeada por cliente"}
+    meta: dict[str, object] = {
+        "cliente": client_col, "valor": value_col, "vencimento": due_col or "Não disponível",
+        "linha": line_col or "Mapeada pelo gerente dominante da BASE BI",
+        "gerente": manager_col or "Mapeado pelo cliente na BASE BI",
+        "sheet": source_meta.get("sheet", ""),
+        "resumo_gerentes": source_meta.get("resumo_gerentes", []),
+    }
     return x, meta
 
 
@@ -874,7 +961,10 @@ with st.sidebar:
 
     default_base = first_existing(["BASE BI.xlsx", "BASE BI(1).xlsx", "base_bi.xlsx"])
     default_rev = first_existing(["rev2026 Base bi.xlsx", "rev2026 Base bi(1).xlsx", "REV2026.xlsx"])
-    default_inad = first_existing(["inadimplencia.xlsx", "Inadimplencia.xlsx", "base_inadimplencia.xlsx", "inadimplencia.csv"])
+    default_inad = first_existing([
+        "relatorio_cobranca_gerente.xlsx", "relatorio_cobranca_gerente_2026-07-13.xlsx",
+        "inadimplencia.xlsx", "Inadimplencia.xlsx", "base_inadimplencia.xlsx", "inadimplencia.csv"
+    ])
 
     up_base = up_rev = up_inad = None
     if is_director:
@@ -929,7 +1019,7 @@ with st.sidebar:
         st.markdown(f"<div class='secure-note'><b>Visão restrita:</b> {line_label(scope_choice)}. Outras linhas e custos compartilhados não são exibidos.</div>", unsafe_allow_html=True)
 
     st.markdown("#### Navegação")
-    pages = ["Dashboard", "Recebimentos & inadimplência", "Clientes", "Custos diretos", "Qualidade & metodologia"]
+    pages = ["Dashboard", "Recebimentos & inadimplência", "Clientes", "Produtos", "Custos diretos", "Qualidade & metodologia"]
     if is_director:
         pages.insert(1, "Linhas de negócio")
     page = st.radio("Navegação", pages, label_visibility="collapsed")
@@ -1234,8 +1324,18 @@ elif page == "Recebimentos & inadimplência":
             hide_value_axis(fig, "x")
             st.plotly_chart(plot_layout(fig, 400, False), width="stretch", config={"displayModeBar": False})
 
-        detail = inad_scope[["_CLIENTE", "_TITULO", "_VENCIMENTO", "_DIAS_ATRASO", "_FAIXA", "_VALOR_VENCIDO", "_LINHA"]].copy()
-        detail.columns = ["Cliente", "Título", "Vencimento", "Dias de atraso", "Faixa", "Valor vencido", "Linha"]
+        if is_director and inad_meta and inad_meta.get("resumo_gerentes"):
+            crm_summary = pd.DataFrame(inad_meta["resumo_gerentes"])
+            crm_summary = crm_summary[crm_summary["Gerente"].map(norm).isin(set(MANAGER_LINE_MAP) | {"GABRIEL", "SEM GERENTE"})]
+            crm_summary["Linha"] = crm_summary["Linha"].map(line_label)
+            crm_view = crm_summary[["Gerente", "Linha", "Clientes", "Títulos", "Valor", "Maior atraso"]].copy()
+            crm_view["Valor"] = crm_view["Valor"].map(brl)
+            st.markdown("**Resumo original exportado pelo CRM de cobrança**")
+            st.dataframe(crm_view, width="stretch", hide_index=True)
+            st.caption("O detalhamento do arquivo não contém a coluna Gerente. Para restringir os títulos por gestor, o app relaciona cada cliente ao gerente dominante da BASE BI.")
+
+        detail = inad_scope[["_CLIENTE", "_TITULO", "_VENCIMENTO", "_DIAS_ATRASO", "_FAIXA", "_VALOR_VENCIDO", "_LINHA", "_GERENTE"]].copy()
+        detail.columns = ["Cliente", "Título", "Vencimento", "Dias de atraso", "Faixa", "Valor vencido", "Linha", "Gerente"]
         detail["Linha"] = detail["Linha"].map(line_label)
         detail_view = detail.sort_values("Valor vencido", ascending=False).copy()
         detail_view["Valor vencido"] = detail_view["Valor vencido"].map(brl)
@@ -1286,6 +1386,78 @@ elif page == "Clientes":
     st.dataframe(view, width="stretch", hide_index=True, height=430)
     st.caption("Faturamento e recebimentos são apresentados separadamente porque as bases podem usar grafias diferentes para o mesmo cliente.")
 
+
+# =========================================================
+# PRODUTOS
+# =========================================================
+elif page == "Produtos":
+    section_header("Performance de produtos", "Faturamento, volume, concentração e carteira no escopo autorizado", scope_text)
+    if fat_scope.empty:
+        st.info("Não há faturamento no período e escopo selecionados.")
+    else:
+        product_col = optional_col(fat_scope, ["PRODUTO", "DESCRIÇÃO", "LINHA DE PRODUTO", "ITEM"])
+        qty_col = optional_col(fat_scope, ["QUANTIDADE", "QTD", "QTDE", "QTD FATURADA", "QUANTIDADE FATURADA"])
+        client_col = "NOME DO CLIENTE" if "NOME DO CLIENTE" in fat_scope.columns else "CLIENTE"
+        if product_col is None:
+            st.info("A base de faturamento não possui uma coluna de produto reconhecida.")
+        else:
+            prod_base = fat_scope.copy()
+            prod_base["_PRODUTO"] = prod_base[product_col].fillna("Não informado").astype(str).str.strip()
+            prod_base["_QTD"] = to_number(prod_base[qty_col]) if qty_col else 1.0
+            prod_base.loc[prod_base["_QTD"] <= 0, "_QTD"] = 1.0
+            nf_col = "Nota Fiscal" if "Nota Fiscal" in prod_base.columns else None
+            agg_map = {
+                "Faturamento": ("_VALOR", "sum"),
+                "Quantidade": ("_QTD", "sum"),
+                "Clientes": (client_col, "nunique"),
+            }
+            if nf_col:
+                agg_map["Notas"] = (nf_col, "nunique")
+            else:
+                agg_map["Notas"] = ("_VALOR", "size")
+            products = prod_base.groupby("_PRODUTO", as_index=False).agg(**agg_map)
+            total_products = float(products["Faturamento"].sum())
+            products["Participação"] = np.where(total_products != 0, products["Faturamento"] / total_products, 0)
+            products["Preço médio"] = np.where(products["Quantidade"] != 0, products["Faturamento"] / products["Quantidade"], 0)
+            products = products.sort_values("Faturamento", ascending=False)
+            top_product = products.iloc[0]
+            top10_share = float(products.head(10)["Faturamento"].sum() / total_products) if total_products else 0
+
+            k1, k2, k3, k4, k5 = st.columns(5)
+            with k1: card("Faturamento de produtos", brl(total_products), "Valor emitido no período", BLUE)
+            with k2: card("Produtos ativos", f"{len(products):,}".replace(",", "."), "Itens com faturamento", NAVY)
+            with k3: card("Quantidade", f"{products['Quantidade'].sum():,.0f}".replace(",", "."), f"Fonte: {qty_col or 'linhas faturadas'}", TEAL)
+            with k4: card("Produto líder", short_label(top_product["_PRODUTO"], 24), brl(top_product["Faturamento"]), GREEN)
+            with k5: card("Concentração Top 10", pct(top10_share), "Participação dos dez maiores produtos", ORANGE if top10_share > .70 else CYAN)
+
+            c1, c2 = st.columns([1.25, 1])
+            with c1:
+                top = products.head(15).sort_values("Faturamento")
+                top["Produto"] = top["_PRODUTO"].map(lambda x: short_label(x, 42))
+                fig = px.bar(top, x="Faturamento", y="Produto", orientation="h", title="Produtos com maior faturamento", custom_data=["_PRODUTO"])
+                fig.update_traces(marker_color=BLUE, text=top["Faturamento"].map(compact_money), textposition="outside", cliponaxis=False,
+                                  hovertemplate="%{customdata[0]}<br>Faturamento: R$ %{x:,.2f}<extra></extra>")
+                hide_value_axis(fig, "x")
+                st.plotly_chart(plot_layout(fig, 520, False), width="stretch", config={"displayModeBar": False})
+            with c2:
+                qty_top = products.sort_values("Quantidade", ascending=False).head(12).sort_values("Quantidade")
+                qty_top["Produto"] = qty_top["_PRODUTO"].map(lambda x: short_label(x, 34))
+                fig = px.bar(qty_top, x="Quantidade", y="Produto", orientation="h", title="Produtos com maior volume")
+                fig.update_traces(marker_color=TEAL, text=qty_top["Quantidade"].map(lambda v: f"{v:,.0f}".replace(",", ".")), textposition="outside", cliponaxis=False)
+                hide_value_axis(fig, "x")
+                st.plotly_chart(plot_layout(fig, 520, False), width="stretch", config={"displayModeBar": False})
+
+            section_header("Detalhamento dos produtos", "Receita, volume, clientes e preço médio")
+            table = products.rename(columns={"_PRODUTO": "Produto"})[["Produto", "Faturamento", "Participação", "Quantidade", "Preço médio", "Clientes", "Notas"]].copy()
+            table_view = table.copy()
+            table_view["Faturamento"] = table_view["Faturamento"].map(brl)
+            table_view["Participação"] = table_view["Participação"].map(pct)
+            table_view["Quantidade"] = table_view["Quantidade"].map(lambda v: f"{v:,.0f}".replace(",", "."))
+            table_view["Preço médio"] = table_view["Preço médio"].map(brl)
+            st.dataframe(table_view, width="stretch", hide_index=True, height=470)
+            st.download_button("Exportar análise de produtos", dataframe_download(table, "Produtos"),
+                               file_name=f"produtos_{scope_choice}_{start_month}_{end_month}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # =========================================================
 # CUSTOS DIRETOS
@@ -1376,7 +1548,7 @@ elif page == "Qualidade & metodologia":
     st.dataframe(methodology, width="stretch", hide_index=True, height=390)
 
     st.markdown(
-        "<div class='scope-note'><b>Acesso por gestor:</b> os perfis de Microtech, Locação, Vendas e Endoscopia visualizam apenas receitas recebidas, faturamento, clientes, inadimplência e custos diretos da própria linha. Não há comparação com outras linhas nem exposição de áreas compartilhadas.</div>",
+        "<div class='scope-note'><b>Acesso por gestor:</b> os perfis de Microtech, Locação, Vendas e Endoscopia visualizam apenas receitas recebidas, faturamento, produtos, clientes, inadimplência e custos diretos da própria linha. Não há comparação com outras linhas nem exposição de áreas compartilhadas.</div>",
         unsafe_allow_html=True,
     )
     if user["secure"] != "Sim":
