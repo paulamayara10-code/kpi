@@ -64,6 +64,38 @@ st.markdown(
     .small-muted {{ color: {GRAY}; font-size: .79rem; }}
     .kpi-help {{ background: #FFFFFF; border: 1px solid #E7EBF0; border-radius: 12px; padding: 13px 15px; margin-bottom: 10px; line-height: 1.45; }}
     .kpi-help b {{ color: {NAVY}; }}
+    .brand-shell {{
+        display:flex; align-items:center; justify-content:space-between; gap:18px;
+        position:relative; z-index:2;
+    }}
+    .brand-word {{ font-size:1.42rem; font-weight:900; letter-spacing:.12em; color:white; line-height:1; }}
+    .brand-word span {{ display:block; font-size:.60rem; font-weight:700; letter-spacing:.28em; color:#7FDBE0; margin-top:5px; }}
+    .period-chip {{ background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.22); color:white; padding:8px 12px; border-radius:999px; font-size:.76rem; font-weight:700; white-space:nowrap; }}
+    .hero::after {{ content:""; position:absolute; width:260px; height:260px; border-radius:50%; background:rgba(255,255,255,.05); right:-90px; top:-135px; }}
+    .hero {{ position:relative; }}
+    .kpi-card {{ border-top:4px solid {TEAL}; transition:transform .18s ease, box-shadow .18s ease; }}
+    .kpi-card:hover {{ transform:translateY(-2px); box-shadow:0 10px 24px rgba(16,24,40,.09); }}
+    .section-head {{ display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin:18px 0 10px 0; padding-bottom:8px; border-bottom:1px solid #E4EAF1; }}
+    .section-head h3 {{ margin:0; color:{NAVY}; font-size:1.17rem; font-weight:850; letter-spacing:-.01em; }}
+    .section-head p {{ margin:3px 0 0 0; color:{GRAY}; font-size:.80rem; }}
+    .status-chip {{ display:inline-flex; align-items:center; padding:5px 9px; border-radius:999px; font-size:.70rem; font-weight:800; letter-spacing:.03em; text-transform:uppercase; }}
+    .status-critical {{ background:#FDECEC; color:{RED}; }}
+    .status-high {{ background:#FFF1E6; color:#A34F00; }}
+    .status-medium {{ background:#FFF8D9; color:#7A5C00; }}
+    .status-positive {{ background:#E8F5EE; color:{GREEN}; }}
+    .attention-card {{ background:white; border:1px solid #E7EBF0; border-left:5px solid {ORANGE}; border-radius:14px; padding:14px 16px; margin:8px 0; box-shadow:0 3px 10px rgba(16,24,40,.04); }}
+    .attention-card.critical {{ border-left-color:{RED}; }}
+    .attention-card.positive {{ border-left-color:{GREEN}; }}
+    .attention-title {{ color:{NAVY}; font-weight:850; margin:7px 0 4px 0; font-size:.95rem; }}
+    .attention-evidence {{ color:#475467; font-size:.81rem; line-height:1.45; }}
+    .attention-action {{ color:{NAVY}; font-size:.80rem; line-height:1.45; margin-top:7px; padding-top:7px; border-top:1px dashed #D8DEE6; }}
+    [data-testid="stTabs"] button {{ color:#475467; font-weight:750; padding:.70rem .75rem; }}
+    [data-testid="stTabs"] button[aria-selected="true"] {{ color:{NAVY}; border-bottom-color:{TEAL}; }}
+    [data-testid="stSidebar"] .stButton button, [data-testid="stSidebar"] .stDownloadButton button {{ border-radius:10px; }}
+    .sidebar-brand {{ background:linear-gradient(135deg,{NAVY},#164D7D); border-radius:15px; padding:16px; color:white; margin-bottom:10px; }}
+    .sidebar-brand strong {{ font-size:1.18rem; letter-spacing:.11em; }}
+    .sidebar-brand small {{ display:block; opacity:.75; margin-top:5px; font-size:.72rem; }}
+    .metric-strip {{ background:white; border:1px solid #E7EBF0; border-radius:14px; padding:12px 14px; }}
     @media (max-width: 900px) {{
         .block-container {{ padding-left: .8rem; padding-right: .8rem; }}
         .hero {{ padding: 18px 18px; }}
@@ -140,13 +172,44 @@ def month_label(period: pd.Period) -> str:
     return f"{names[period.month - 1]}/{str(period.year)[2:]}"
 
 
-def card(label: str, value: str, note: str = "") -> None:
+def card(label: str, value: str, note: str = "", tone: str = TEAL) -> None:
     st.markdown(
         f"""
-        <div class="kpi-card">
+        <div class="kpi-card" style="border-top-color:{tone}">
           <div class="kpi-label">{label}</div>
           <div class="kpi-value">{value}</div>
           <div class="kpi-note">{note}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def section_header(title: str, subtitle: str = "", badge: str = "") -> None:
+    badge_html = f"<span class='status-chip status-positive'>{badge}</span>" if badge else ""
+    st.markdown(
+        f"""
+        <div class="section-head">
+          <div><h3>{title}</h3><p>{subtitle}</p></div>
+          {badge_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def management_card(priority: str, title: str, evidence: str, action: str, positive: bool = False) -> None:
+    cls = "positive" if positive else ("critical" if priority in {"Crítica", "Alta"} else "")
+    chip_cls = "status-positive" if positive else {
+        "Crítica": "status-critical", "Alta": "status-high", "Média": "status-medium"
+    }.get(priority, "status-medium")
+    st.markdown(
+        f"""
+        <div class="attention-card {cls}">
+          <span class="status-chip {chip_cls}">{priority}</span>
+          <div class="attention-title">{title}</div>
+          <div class="attention-evidence">{evidence}</div>
+          <div class="attention-action"><b>Ação sugerida:</b> {action}</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -324,7 +387,7 @@ def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame]:
 
     text_cols = [
         "GERENTE", "VENDEDOR / REPRESENTANTE", "VENDEDOR", "SEGMENTO", "EMPRESA", "NOVA",
-        "NOME DO CLIENTE", "CLIENTE", "LINHA DE PRODUTO", "PRODUTO", "Nota Fiscal", "CATEGORIA",
+        "NOME DO CLIENTE", "CLIENTE", "FORNECEDOR", "LINHA DE PRODUTO", "PRODUTO", "Nota Fiscal", "CATEGORIA",
     ]
     for col in text_cols:
         if col in fat.columns:
@@ -545,6 +608,194 @@ def executive_totals(monthly: pd.DataFrame, caixa: pd.DataFrame, start: pd.Perio
     return sums
 
 
+def top_value_share(df: pd.DataFrame, dimension: str, value_col: str = "_VALOR", top_n: int = 5) -> tuple[pd.DataFrame, float, float]:
+    if dimension not in df.columns or df.empty:
+        return pd.DataFrame(columns=[dimension, value_col]), 0.0, 0.0
+    summary = (
+        df.groupby(dimension, as_index=False)[value_col].sum()
+        .sort_values(value_col, ascending=False)
+    )
+    total = float(summary[value_col].sum())
+    top1 = safe_div(float(summary.iloc[0][value_col]), total) if not summary.empty else 0.0
+    topn = safe_div(float(summary.head(top_n)[value_col].sum()), total) if not summary.empty else 0.0
+    return summary, top1, topn
+
+
+def supplier_summary(df: pd.DataFrame) -> pd.DataFrame:
+    supplier_col = "Codigo-Nome do Fornecedor"
+    if df.empty or supplier_col not in df.columns:
+        return pd.DataFrame(columns=["Fornecedor", "Valor", "Participação", "Lançamentos", "Ticket Médio", "Principal Natureza"])
+    x = df.copy()
+    x[supplier_col] = x[supplier_col].fillna("Não informado").astype(str).str.strip()
+    total = float(x["_VALOR"].sum())
+    base = x.groupby(supplier_col, as_index=False).agg(Valor=("_VALOR", "sum"), Lançamentos=("_VALOR", "size"))
+    nature = (
+        x.groupby([supplier_col, "PAI"], as_index=False)["_VALOR"].sum()
+        .sort_values("_VALOR", ascending=False)
+        .drop_duplicates(supplier_col)
+        .rename(columns={"PAI": "Principal Natureza"})[[supplier_col, "Principal Natureza"]]
+    )
+    base = base.merge(nature, on=supplier_col, how="left")
+    base["Participação"] = np.where(total != 0, base["Valor"] / total, 0)
+    base["Ticket Médio"] = np.where(base["Lançamentos"] != 0, base["Valor"] / base["Lançamentos"], 0)
+    return base.rename(columns={supplier_col: "Fornecedor"}).sort_values("Valor", ascending=False)
+
+
+def client_summary(df: pd.DataFrame) -> pd.DataFrame:
+    client_col = "NOME DO CLIENTE" if "NOME DO CLIENTE" in df.columns else "CLIENTE"
+    if df.empty or client_col not in df.columns:
+        return pd.DataFrame(columns=["Cliente", "Faturamento", "Participação", "Notas", "Ticket Médio", "Principal Segmento"])
+    x = df.copy()
+    total = float(x["_VALOR"].sum())
+    invoice_col = "Nota Fiscal" if "Nota Fiscal" in x.columns else None
+    if invoice_col:
+        base = x.groupby(client_col, as_index=False).agg(Faturamento=("_VALOR", "sum"), Notas=(invoice_col, "nunique"))
+    else:
+        base = x.groupby(client_col, as_index=False).agg(Faturamento=("_VALOR", "sum"), Notas=("_VALOR", "size"))
+    if "SEGMENTO" in x.columns:
+        segment = (
+            x.groupby([client_col, "SEGMENTO"], as_index=False)["_VALOR"].sum()
+            .sort_values("_VALOR", ascending=False).drop_duplicates(client_col)
+            .rename(columns={"SEGMENTO": "Principal Segmento"})[[client_col, "Principal Segmento"]]
+        )
+        base = base.merge(segment, on=client_col, how="left")
+    else:
+        base["Principal Segmento"] = "Não informado"
+    base["Participação"] = np.where(total != 0, base["Faturamento"] / total, 0)
+    base["Ticket Médio"] = np.where(base["Notas"] != 0, base["Faturamento"] / base["Notas"], 0)
+    return base.rename(columns={client_col: "Cliente"}).sort_values("Faturamento", ascending=False)
+
+
+def negotiable_expenses(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+    text = (
+        df.get("PAI", "").astype(str) + " " +
+        df.get("Categoria", "").astype(str) + " " +
+        df.get("Codigo-Nome do Fornecedor", "").astype(str)
+    ).map(norm)
+    blocked = [
+        "IMPOST", "TRIBUTO", "IRPJ", "CSLL", "COFINS", "PIS", "ICMS", "ISS", "INSS", "FGTS",
+        "SALARIO", "FOLHA", "FERIAS", "13 SALARIO", "RECEITA FEDERAL", "PREFEITURA", "GNRE",
+        "CAPITAL DE GIRO", "EMPRESTIMO", "DISTRIBUICAO DE LUCROS"
+    ]
+    mask = ~text.apply(lambda v: any(k in v for k in blocked))
+    return df[mask].copy()
+
+
+def build_management_analysis(
+    totals: dict[str, float], monthly: pd.DataFrame, fat_period: pd.DataFrame,
+    expense_period: pd.DataFrame, supplier_table: pd.DataFrame, client_table: pd.DataFrame,
+) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    def add(priority: str, title: str, evidence: str, action: str, kind: str = "Atenção") -> None:
+        items.append({"Prioridade": priority, "Tipo": kind, "Tema": title, "Evidência": evidence, "Ação sugerida": action})
+
+    non_op = totals.get("Dependência Não Operacional", 0)
+    if non_op >= .20:
+        add("Alta", "Dependência relevante de entradas não operacionais",
+            f"{pct(non_op)} das entradas classificadas não vieram da operação ({brl(totals.get('Receita Não Operacional', 0))}).",
+            "Criar meta mensal de redução da dependência de capital de giro e acompanhar separadamente contratação, amortização, juros e vencimentos.")
+    elif non_op >= .10:
+        add("Média", "Participação não operacional no caixa",
+            f"Entradas não operacionais representam {pct(non_op)} das entradas classificadas.",
+            "Manter um quadro específico de dívida e impedir que essas entradas sejam interpretadas como conversão comercial.")
+
+    perf = totals.get("Performance Recebimento", 0)
+    if perf < .90:
+        add("Alta", "Recebimentos abaixo do previsto",
+            f"A performance de recebimento foi de {pct(perf)}.",
+            "Priorizar os maiores títulos vencidos, definir responsáveis por cliente e medir recuperação semanal por gerente/vendedor.")
+    elif perf < .97:
+        add("Média", "Gap entre previsto e realizado",
+            f"O realizado alcançou {pct(perf)} do previsto.",
+            "Revisar promessas de pagamento, atualizar previsões e separar atrasos pontuais de clientes reincidentes.")
+
+    conversion = totals.get("Conversão do Faturamento", 0)
+    if conversion < .80:
+        add("Alta", "Baixa conversão do faturamento em caixa operacional",
+            f"A conversão foi de {pct(conversion)} no período.",
+            "Revisar prazos comerciais, entrada mínima, marcos de faturamento e condições para clientes com maior prazo médio.")
+    elif conversion < .95:
+        add("Média", "Conversão operacional abaixo do faturamento emitido",
+            f"A receita operacional recebida equivale a {pct(conversion)} do faturamento.",
+            "Acompanhar uma ponte mensal entre faturado, recebido e saldo a receber, considerando a defasagem entre competência e caixa.")
+
+    ebitda_margin = totals.get("Margem EBITDA", 0)
+    if ebitda_margin < 0:
+        add("Crítica", "EBITDA gerencial negativo",
+            f"A margem EBITDA do período ficou em {pct(ebitda_margin)}.",
+            "Executar plano imediato de proteção de caixa: congelar gastos discricionários, revisar contratos e priorizar receitas de maior margem.")
+    elif ebitda_margin < .15:
+        add("Alta", "Margem EBITDA pressionada",
+            f"A margem EBITDA ficou em {pct(ebitda_margin)}.",
+            "Revisar despesas fixas, comissões, locações, importações e preços dos contratos com menor margem.")
+    elif ebitda_margin >= .25:
+        add("Positiva", "Margem EBITDA gerencial saudável",
+            f"A margem EBITDA atingiu {pct(ebitda_margin)}.",
+            "Preservar disciplina de custos e validar a sustentabilidade do indicador no DRE por competência.", kind="Oportunidade")
+
+    neg_months = monthly[monthly["EBITDA Gerencial"] < 0]
+    if not neg_months.empty:
+        add("Alta", "Meses com geração operacional negativa",
+            f"EBITDA gerencial negativo em {', '.join(neg_months['Mês Texto'].tolist())}.",
+            "Abrir cada mês por recebimentos, fornecedores e categorias para identificar descasamentos e pagamentos não recorrentes.")
+
+    if not supplier_table.empty:
+        top1_supplier = supplier_table.iloc[0]
+        top5_share = float(supplier_table.head(5)["Participação"].sum())
+        if top5_share >= .40:
+            add("Média", "Concentração de despesas em poucos fornecedores",
+                f"Os cinco maiores fornecedores concentram {pct(top5_share)} das despesas; o maior é {top1_supplier['Fornecedor']} com {brl(top1_supplier['Valor'])}.",
+                "Separar itens negociáveis de tributos/folha e executar rodada de cotação, revisão de prazo e consolidação de volume nos maiores parceiros.")
+
+    if not client_table.empty:
+        top_client = client_table.iloc[0]
+        top5_client_share = float(client_table.head(5)["Participação"].sum())
+        if top5_client_share >= .45:
+            add("Alta", "Concentração de faturamento em poucos clientes",
+                f"Os cinco maiores clientes representam {pct(top5_client_share)} do faturamento; {top_client['Cliente']} lidera com {brl(top_client['Faturamento'])}.",
+                "Definir limite de concentração, plano de renovação dos contratos relevantes e ações comerciais para ampliar clientes e segmentos.")
+
+    if not fat_period.empty and "SEGMENTO" in fat_period.columns:
+        segments, top1_seg, _ = top_value_share(fat_period, "SEGMENTO")
+        if top1_seg >= .50 and not segments.empty:
+            add("Média", "Dependência de um segmento principal",
+                f"{segments.iloc[0]['SEGMENTO']} representa {pct(top1_seg)} do faturamento.",
+                "Avaliar metas de diversificação por linha e acelerar oportunidades em segmentos com melhor margem e menor concentração.")
+
+    if not fat_period.empty and "GERENTE" in fat_period.columns:
+        managers, top1_mgr, _ = top_value_share(fat_period, "GERENTE")
+        if top1_mgr >= .55 and not managers.empty:
+            add("Média", "Concentração comercial por gestão",
+                f"{managers.iloc[0]['GERENTE']} responde por {pct(top1_mgr)} do faturamento.",
+                "Criar metas de crescimento para as demais carteiras e acompanhar pipeline, conversão e margem por gerente.")
+
+    if not expense_period.empty:
+        nature, top1_nature, top5_nature = top_value_share(expense_period, "PAI")
+        if top1_nature >= .25 and not nature.empty:
+            add("Média", "Estrutura de custos concentrada",
+                f"{nature.iloc[0]['PAI']} representa {pct(top1_nature)} das despesas operacionais; as cinco maiores naturezas somam {pct(top5_nature)}.",
+                "Criar plano específico para a principal natureza, com orçamento, responsável, meta e comparação mensal com faturamento.")
+
+        monthly_cost = expense_period.groupby("_MES", as_index=False)["_VALOR"].sum().sort_values("_MES")
+        if len(monthly_cost) >= 2:
+            last = float(monthly_cost.iloc[-1]["_VALOR"])
+            prev_avg = float(monthly_cost.iloc[:-1]["_VALOR"].mean())
+            growth = safe_div(last - prev_avg, prev_avg)
+            if growth >= .15:
+                add("Alta", "Aceleração recente das despesas",
+                    f"O último mês ficou {pct(growth)} acima da média dos meses anteriores.",
+                    "Abrir os lançamentos do último mês por fornecedor e natureza e identificar despesas recorrentes, antecipações e eventos extraordinários.")
+
+    if not items:
+        add("Positiva", "Indicadores sem alertas relevantes no período",
+            "Os principais limites gerenciais definidos para caixa, margem e concentração não foram ultrapassados.",
+            "Manter o acompanhamento mensal e revisar os limites conforme o orçamento aprovado.", kind="Oportunidade")
+    order = {"Crítica": 0, "Alta": 1, "Média": 2, "Positiva": 3}
+    return sorted(items, key=lambda x: order.get(x["Prioridade"], 9))
+
+
 # =========================================================
 # FONTES
 # =========================================================
@@ -552,8 +803,16 @@ default_base = first_existing(["BASE BI.xlsx", "BASE BI(1).xlsx", "base_bi.xlsx"
 default_rev = first_existing(["rev2026 Base bi.xlsx", "rev2026 Base bi(1).xlsx", "REV2026.xlsx"])
 
 with st.sidebar:
-    st.markdown(f"<h2 style='color:{NAVY};margin-bottom:0'>📊 KPIs Executivos</h2>", unsafe_allow_html=True)
-    st.caption("Painel gerencial integrado")
+    st.markdown(
+        """
+        <div class="sidebar-brand">
+          <strong>FIRST</strong>
+          <small>MEDICAL · CONTROLADORIA</small>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("Painel executivo integrado de performance")
     with st.expander("📁 Fontes de dados", expanded=False):
         up_base = st.file_uploader("Substituir BASE BI", type=["xlsx", "xlsm"], key="up_base")
         up_rev = st.file_uploader("Substituir REV2026", type=["xlsx", "xlsm"], key="up_rev")
@@ -609,13 +868,28 @@ monthly = calculate_monthly(
     st.session_state["cost_classifications"], start_month, end_month,
 )
 totals = executive_totals(monthly, caixa, start_month, end_month)
+fat_period_all = period_filter(fat, start_month, end_month)
+expense_period_all = period_filter(expenses, start_month, end_month)
+expense_period_all = expense_period_all[expense_period_all["_GRUPO_N"] == "SAIDAS OPERACIONAIS"].copy()
+supplier_table_all = supplier_summary(expense_period_all)
+negotiable_supplier_table_all = supplier_summary(negotiable_expenses(expense_period_all))
+client_table_all = client_summary(fat_period_all)
+management_analysis = build_management_analysis(
+    totals, monthly, fat_period_all, expense_period_all, negotiable_supplier_table_all, client_table_all
+)
 
 period_text = f"{month_label(start_month)} a {month_label(end_month)}"
 st.markdown(
     f"""
     <div class="hero">
-      <h1>Painel Executivo de KPIs</h1>
-      <p>{period_text} · resultado comercial, margem, caixa, recebimentos e estrutura de custos</p>
+      <div class="brand-shell">
+        <div>
+          <div class="brand-word">FIRST<span>MEDICAL</span></div>
+          <h1 style="margin-top:16px">Painel Executivo de Performance</h1>
+          <p>Resultado comercial, rentabilidade, caixa, clientes, fornecedores e estrutura de custos</p>
+        </div>
+        <div class="period-chip">{period_text}</div>
+      </div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -623,10 +897,10 @@ st.markdown(
 
 # KPIs principais — quatro cartões por linha para preservar leitura e evitar sobreposição.
 k1, k2, k3, k4 = st.columns(4)
-with k1: card("Faturamento bruto", brl(totals["Faturamento"]), f"Vendas emitidas · Meta: {brl(totals['Meta'])}")
-with k2: card("Atingimento da meta", pct(totals["Atingimento"]), "Faturamento bruto ÷ meta comercial")
-with k3: card("Margem de contribuição", pct(totals["MC %"]), f"Valor: {brl(totals['Margem de Contribuição'])}")
-with k4: card("EBITDA gerencial de caixa", brl(totals["EBITDA Gerencial"]), "Operação antes de IRPJ e CSLL; visão gerencial")
+with k1: card("Faturamento bruto", brl(totals["Faturamento"]), f"Vendas emitidas · Meta: {brl(totals['Meta'])}", BLUE)
+with k2: card("Atingimento da meta", pct(totals["Atingimento"]), "Faturamento bruto ÷ meta comercial", TEAL)
+with k3: card("Margem de contribuição", pct(totals["MC %"]), f"Valor: {brl(totals['Margem de Contribuição'])}", GREEN)
+with k4: card("EBITDA gerencial de caixa", brl(totals["EBITDA Gerencial"]), "Operação antes de IRPJ e CSLL; visão gerencial", NAVY)
 
 k5, k6, k7, k8 = st.columns(4)
 with k5: card("Margem EBITDA", pct(totals["Margem EBITDA"]), "EBITDA gerencial ÷ receita operacional recebida")
@@ -669,8 +943,9 @@ with st.expander("ℹ️ Como interpretar cada KPI", expanded=False):
 
 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-tab_exec, tab_result, tab_com, tab_cash, tab_cost, tab_quality = st.tabs([
-    "Visão Executiva", "Resultado Mensal", "Comercial", "Caixa & Recebimentos", "Custos & Premissas", "Qualidade da Base"
+tab_exec, tab_result, tab_com, tab_cash, tab_cost, tab_parties, tab_actions, tab_quality = st.tabs([
+    "Visão Executiva", "Resultado Mensal", "Comercial", "Caixa & Recebimentos",
+    "Custos", "Fornecedores & Clientes", "Pontos de Atenção", "Qualidade da Base"
 ])
 
 # =========================================================
@@ -759,6 +1034,19 @@ with tab_exec:
         insights.append(f"Houve EBITDA gerencial negativo em <b>{months_negative}</b>; vale revisar o descasamento entre recebimentos e pagamentos desses meses.")
     for item in insights:
         st.markdown(f"<div class='insight'>{item}</div>", unsafe_allow_html=True)
+
+    section_header("Prioridades gerenciais do período", "Alertas e oportunidades calculados automaticamente a partir das bases", "Análise automática")
+    a1, a2 = st.columns(2)
+    attention_items = [x for x in management_analysis if x["Prioridade"] in {"Crítica", "Alta", "Média"}][:4]
+    positive_items = [x for x in management_analysis if x["Prioridade"] == "Positiva"][:2]
+    with a1:
+        for item in attention_items[::2]:
+            management_card(item["Prioridade"], item["Tema"], item["Evidência"], item["Ação sugerida"])
+    with a2:
+        for item in attention_items[1::2]:
+            management_card(item["Prioridade"], item["Tema"], item["Evidência"], item["Ação sugerida"])
+        for item in positive_items:
+            management_card(item["Prioridade"], item["Tema"], item["Evidência"], item["Ação sugerida"], positive=True)
 
 # =========================================================
 # RESULTADO MENSAL
@@ -984,80 +1272,224 @@ with tab_cash:
         st.plotly_chart(plot_layout(fig, 350, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
 # =========================================================
-# CUSTOS & PREMISSAS
+# CUSTOS
 # =========================================================
 with tab_cost:
-    st.markdown("<div class='section-title'>Análise de custos operacionais</div>", unsafe_allow_html=True)
+    section_header("Estrutura de custos", "Análise por natureza, centro de custo, rateio e fornecedor", "Visão gerencial")
     cost_period = period_filter(costs, start_month, end_month)
     cost_period = cost_period[cost_period["_GRUPO_N"] == "SAIDAS OPERACIONAIS"].copy()
-    cc1, cc2 = st.columns(2)
-    centers = cc1.multiselect("Centro de custos", sorted(cost_period["CENTRO DE CUSTOS"].dropna().unique())) if "CENTRO DE CUSTOS" in cost_period else []
-    rateios = cc2.multiselect("Rateio", sorted(cost_period["CENTRO DE CUSTOS RATEAO"].dropna().unique())) if "CENTRO DE CUSTOS RATEAO" in cost_period else []
+
+    f1, f2, f3, f4 = st.columns(4)
+    centers = f1.multiselect("Centro de custos", sorted(cost_period["CENTRO DE CUSTOS"].dropna().unique())) if "CENTRO DE CUSTOS" in cost_period else []
+    rateios = f2.multiselect("Rateio", sorted(cost_period["CENTRO DE CUSTOS RATEAO"].dropna().unique())) if "CENTRO DE CUSTOS RATEAO" in cost_period else []
+    suppliers = f3.multiselect("Fornecedor", sorted(cost_period["Codigo-Nome do Fornecedor"].dropna().unique())) if "Codigo-Nome do Fornecedor" in cost_period else []
+    natures = f4.multiselect("Natureza gerencial", sorted(cost_period["PAI"].dropna().unique())) if "PAI" in cost_period else []
     if centers: cost_period = cost_period[cost_period["CENTRO DE CUSTOS"].isin(centers)]
     if rateios: cost_period = cost_period[cost_period["CENTRO DE CUSTOS RATEAO"].isin(rateios)]
+    if suppliers: cost_period = cost_period[cost_period["Codigo-Nome do Fornecedor"].isin(suppliers)]
+    if natures: cost_period = cost_period[cost_period["PAI"].isin(natures)]
 
-    c1, c2 = st.columns(2)
-    with c1:
-        pareto = cost_period.groupby("PAI", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(15)
+    supplier_filtered = supplier_summary(cost_period)
+    total_cost = float(cost_period["_VALOR"].sum())
+    supplier_count = int(supplier_filtered["Fornecedor"].nunique()) if not supplier_filtered.empty else 0
+    top_supplier_share = float(supplier_filtered.iloc[0]["Participação"]) if not supplier_filtered.empty else 0
+    avg_month_cost = safe_div(total_cost, max(len(pd.period_range(start_month, end_month, freq="M")), 1))
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: card("Despesas filtradas", brl(total_cost), "Total do recorte selecionado", BLUE)
+    with c2: card("Fornecedores ativos", f"{supplier_count:,}".replace(",", "."), "Contrapartes com lançamentos no período", TEAL)
+    with c3: card("Maior fornecedor", pct(top_supplier_share), "Participação do maior fornecedor", ORANGE)
+    with c4: card("Média mensal", brl(avg_month_cost), "Despesas filtradas ÷ meses", NAVY)
+
+    g1, g2 = st.columns(2)
+    with g1:
+        monthly_cost = cost_period.groupby("_MES", as_index=False)["_VALOR"].sum()
+        monthly_cost["Mês"] = monthly_cost["_MES"].map(month_label)
+        fig = px.bar(monthly_cost, x="Mês", y="_VALOR", title="Evolução Mensal das Despesas")
+        fig.update_traces(marker_color=BLUE, text=monthly_cost["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False,
+                          hovertemplate="%{x}<br>Valor: R$ %{y:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "y"); hide_value_axis(fig, "y")
+        st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
+    with g2:
+        pareto = cost_period.groupby("PAI", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(12)
+        pareto["Natureza"] = pareto["PAI"].map(lambda x: short_label(x, 35))
         pareto_plot = pareto.sort_values("_VALOR")
-        fig = px.bar(pareto_plot, x="_VALOR", y="PAI", orientation="h", title="Pareto de Despesas")
-        fig.update_traces(marker_color=BLUE, hovertemplate="%{y}<br>Valor: R$ %{x:,.2f}<extra></extra>", text=pareto_plot["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False)
-        apply_brl_axis(fig, "x")
-        hide_value_axis(fig, "x")
-        st.plotly_chart(plot_layout(fig, 500, legend_bottom=False), width="stretch", config={"displayModeBar": False})
-    with c2:
+        fig = px.bar(pareto_plot, x="_VALOR", y="Natureza", orientation="h", title="Principais Naturezas", custom_data=["PAI"])
+        fig.update_traces(marker_color=TEAL, text=pareto_plot["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False,
+                          hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "x"); hide_value_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, 450, legend_bottom=False), width="stretch", config={"displayModeBar": False})
+
+    section_header("Fornecedores que mais impactam os custos", "Impostos, folha e financiamentos podem ser excluídos para uma leitura de negociação")
+    only_negotiable = st.toggle("Exibir somente fornecedores e despesas potencialmente negociáveis", value=True, key="neg_costs")
+    supplier_base = negotiable_expenses(cost_period) if only_negotiable else cost_period
+    supplier_view = supplier_summary(supplier_base)
+    s1, s2 = st.columns([1.25, 1])
+    with s1:
+        top_suppliers = supplier_view.head(15).sort_values("Valor")
+        top_suppliers["Nome"] = top_suppliers["Fornecedor"].map(lambda x: short_label(x, 38))
+        fig = px.bar(top_suppliers, x="Valor", y="Nome", orientation="h", title="Ranking de Fornecedores", custom_data=["Fornecedor"])
+        fig.update_traces(marker_color=BLUE, text=top_suppliers["Valor"].map(compact_currency_label), textposition="outside", cliponaxis=False,
+                          hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "x"); hide_value_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, 520, legend_bottom=False), width="stretch", config={"displayModeBar": False})
+    with s2:
         by_cc = cost_period.groupby("CENTRO DE CUSTOS RATEAO", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(12)
-        by_cc["Rateio"] = by_cc["CENTRO DE CUSTOS RATEAO"].map(lambda x: short_label(x, 34))
+        by_cc["Rateio"] = by_cc["CENTRO DE CUSTOS RATEAO"].map(lambda x: short_label(x, 31))
         by_cc_plot = by_cc.sort_values("_VALOR")
         fig = px.bar(by_cc_plot, x="_VALOR", y="Rateio", orientation="h", title="Despesas por Rateio", custom_data=["CENTRO DE CUSTOS RATEAO"])
-        fig.update_traces(marker_color=TEAL, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>", text=by_cc_plot["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False)
-        apply_brl_axis(fig, "x")
-        hide_value_axis(fig, "x")
-        st.plotly_chart(plot_layout(fig, 500, legend_bottom=False), width="stretch", config={"displayModeBar": False})
+        fig.update_traces(marker_color=ORANGE, text=by_cc_plot["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False,
+                          hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "x"); hide_value_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, 520, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
-    st.divider()
-    st.markdown("#### Premissas da margem de contribuição e EBITDA")
-    st.caption("Altere a classificação e clique em Aplicar. Os KPIs e gráficos serão recalculados em todo o app.")
-    cost_totals = period_filter(expenses, start_month, end_month)
-    cost_totals = cost_totals[cost_totals["_GRUPO_N"] == "SAIDAS OPERACIONAIS"].groupby("PAI", as_index=False)["_VALOR"].sum()
-    class_df = pd.DataFrame([
-        {"Natureza / PAI": p, "Classificação KPI": cls}
-        for p, cls in st.session_state["cost_classifications"].items()
-    ]).merge(cost_totals.rename(columns={"PAI": "Natureza / PAI", "_VALOR": "Valor no período"}), on="Natureza / PAI", how="left")
-    class_df["Valor no período"] = class_df["Valor no período"].fillna(0)
-    class_df = class_df.sort_values("Valor no período", ascending=False)
-    class_df_editor = class_df.copy()
-    class_df_editor["Valor no período"] = class_df_editor["Valor no período"].map(brl)
-    edited = st.data_editor(
-        class_df_editor,
-        width="stretch",
-        hide_index=True,
-        height=480,
-        column_config={
-            "Natureza / PAI": st.column_config.TextColumn(disabled=True),
-            "Classificação KPI": st.column_config.SelectboxColumn(options=["Variável", "Fixo/Operacional", "Excluir EBITDA"], required=True),
-            "Valor no período": st.column_config.TextColumn(disabled=True),
-        },
-        key="classification_editor",
-    )
-    b1, b2, b3 = st.columns([1, 1, 3])
-    if b1.button("Aplicar premissas", type="primary", width="stretch"):
-        st.session_state["cost_classifications"] = dict(zip(edited["Natureza / PAI"], edited["Classificação KPI"]))
-        st.rerun()
-    if b2.button("Restaurar padrão", width="stretch"):
-        st.session_state["cost_classifications"] = {p: default_classification(p) for p in edited["Natureza / PAI"]}
-        st.rerun()
-    export_premissas = class_df[["Natureza / PAI", "Valor no período"]].copy()
-    export_premissas["Classificação KPI"] = export_premissas["Natureza / PAI"].map(
-        dict(zip(edited["Natureza / PAI"], edited["Classificação KPI"]))
-    )
-    export_premissas = export_premissas[["Natureza / PAI", "Classificação KPI", "Valor no período"]]
-    b3.download_button(
-        "⬇️ Exportar premissas",
-        data=dataframe_download(export_premissas, "Premissas Custos"),
-        file_name="premissas_classificacao_custos.xlsx",
+    if not supplier_view.empty:
+        supplier_display = supplier_view.head(30).copy()
+        supplier_display["Valor"] = supplier_display["Valor"].map(brl)
+        supplier_display["Participação"] = supplier_display["Participação"].map(pct)
+        supplier_display["Ticket Médio"] = supplier_display["Ticket Médio"].map(brl)
+        st.dataframe(supplier_display, width="stretch", hide_index=True, height=430)
+        st.download_button(
+            "Exportar análise de fornecedores",
+            data=dataframe_download(supplier_view, "Fornecedores"),
+            file_name=f"analise_fornecedores_{start_month}_{end_month}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    with st.expander("Premissas da margem de contribuição e EBITDA", expanded=False):
+        st.caption("Altere a classificação e clique em Aplicar. Os KPIs e gráficos serão recalculados em todo o app.")
+        cost_totals = period_filter(expenses, start_month, end_month)
+        cost_totals = cost_totals[cost_totals["_GRUPO_N"] == "SAIDAS OPERACIONAIS"].groupby("PAI", as_index=False)["_VALOR"].sum()
+        class_df = pd.DataFrame([
+            {"Natureza / PAI": p, "Classificação KPI": cls}
+            for p, cls in st.session_state["cost_classifications"].items()
+        ]).merge(cost_totals.rename(columns={"PAI": "Natureza / PAI", "_VALOR": "Valor no período"}), on="Natureza / PAI", how="left")
+        class_df["Valor no período"] = class_df["Valor no período"].fillna(0)
+        class_df = class_df.sort_values("Valor no período", ascending=False)
+        class_df_editor = class_df.copy(); class_df_editor["Valor no período"] = class_df_editor["Valor no período"].map(brl)
+        edited = st.data_editor(
+            class_df_editor, width="stretch", hide_index=True, height=480,
+            column_config={
+                "Natureza / PAI": st.column_config.TextColumn(disabled=True),
+                "Classificação KPI": st.column_config.SelectboxColumn(options=["Variável", "Fixo/Operacional", "Excluir EBITDA"], required=True),
+                "Valor no período": st.column_config.TextColumn(disabled=True),
+            }, key="classification_editor",
+        )
+        b1, b2, b3 = st.columns([1, 1, 3])
+        if b1.button("Aplicar premissas", type="primary", width="stretch"):
+            st.session_state["cost_classifications"] = dict(zip(edited["Natureza / PAI"], edited["Classificação KPI"])); st.rerun()
+        if b2.button("Restaurar padrão", width="stretch"):
+            st.session_state["cost_classifications"] = {p: default_classification(p) for p in edited["Natureza / PAI"]}; st.rerun()
+        export_premissas = class_df[["Natureza / PAI", "Valor no período"]].copy()
+        export_premissas["Classificação KPI"] = export_premissas["Natureza / PAI"].map(dict(zip(edited["Natureza / PAI"], edited["Classificação KPI"])))
+        b3.download_button("Exportar premissas", data=dataframe_download(export_premissas, "Premissas Custos"),
+                           file_name="premissas_classificacao_custos.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="content")
+
+# =========================================================
+# FORNECEDORES & CLIENTES
+# =========================================================
+with tab_parties:
+    section_header("Fornecedores e clientes", "Concentração, recorrência e participação nas movimentações", "Relacionamentos-chave")
+    sub_sup, sub_cli = st.tabs(["Fornecedores", "Clientes"])
+
+    with sub_sup:
+        include_all_counterparties = st.toggle(
+            "Incluir tributos, folha e demais contrapartes não negociáveis",
+            value=False,
+            key="all_supplier_parties",
+        )
+        suppliers_df = supplier_table_all.copy() if include_all_counterparties else negotiable_supplier_table_all.copy()
+        if not suppliers_df.empty:
+            top1 = float(suppliers_df.iloc[0]["Participação"])
+            top5 = float(suppliers_df.head(5)["Participação"].sum())
+            p1, p2, p3, p4 = st.columns(4)
+            with p1: card("Fornecedores / contrapartes", f"{len(suppliers_df):,}".replace(",", "."), "Com despesas operacionais", BLUE)
+            with p2: card("Maior fornecedor negociável" if not include_all_counterparties else "Maior contraparte", brl(suppliers_df.iloc[0]["Valor"]), suppliers_df.iloc[0]["Fornecedor"], ORANGE)
+            with p3: card("Concentração Top 5", pct(top5), "Participação dos cinco maiores", TEAL)
+            with p4: card("Ticket médio", brl(safe_div(suppliers_df["Valor"].sum(), suppliers_df["Lançamentos"].sum())), "Valor médio por lançamento", NAVY)
+
+            sup_plot = suppliers_df.head(15).sort_values("Valor")
+            sup_plot["Nome"] = sup_plot["Fornecedor"].map(lambda x: short_label(x, 40))
+            fig = px.bar(sup_plot, x="Valor", y="Nome", orientation="h", title="Maiores Fornecedores / Contrapartes", custom_data=["Fornecedor"])
+            fig.update_traces(marker_color=BLUE, text=sup_plot["Valor"].map(compact_currency_label), textposition="outside", cliponaxis=False,
+                              hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+            apply_brl_axis(fig, "x"); hide_value_axis(fig, "x")
+            st.plotly_chart(plot_layout(fig, 560, legend_bottom=False), width="stretch", config={"displayModeBar": False})
+
+    with sub_cli:
+        clients_df = client_table_all.copy()
+        if not clients_df.empty:
+            top5 = float(clients_df.head(5)["Participação"].sum())
+            c1, c2, c3, c4 = st.columns(4)
+            with c1: card("Clientes ativos", f"{len(clients_df):,}".replace(",", "."), "Clientes com faturamento no período", BLUE)
+            with c2: card("Maior cliente", brl(clients_df.iloc[0]["Faturamento"]), clients_df.iloc[0]["Cliente"], ORANGE)
+            with c3: card("Concentração Top 5", pct(top5), "Participação dos cinco maiores", TEAL)
+            with c4: card("Receita média por cliente", brl(safe_div(clients_df["Faturamento"].sum(), len(clients_df))), "Faturamento ÷ clientes ativos", NAVY)
+
+            cl1, cl2 = st.columns(2)
+            with cl1:
+                cli_plot = clients_df.head(15).sort_values("Faturamento")
+                cli_plot["Nome"] = cli_plot["Cliente"].map(lambda x: short_label(x, 38))
+                fig = px.bar(cli_plot, x="Faturamento", y="Nome", orientation="h", title="Principais Clientes por Faturamento", custom_data=["Cliente"])
+                fig.update_traces(marker_color=TEAL, text=cli_plot["Faturamento"].map(compact_currency_label), textposition="outside", cliponaxis=False,
+                                  hovertemplate="%{customdata[0]}<br>Faturamento: R$ %{x:,.2f}<extra></extra>")
+                apply_brl_axis(fig, "x"); hide_value_axis(fig, "x")
+                st.plotly_chart(plot_layout(fig, 560, legend_bottom=False), width="stretch", config={"displayModeBar": False})
+            with cl2:
+                receipts_period = period_filter(receitas, start_month, end_month)
+                receipt_clients = receipts_period.groupby("Cliente", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(15)
+                receipt_clients["Nome"] = receipt_clients["Cliente"].map(lambda x: short_label(x, 38))
+                receipt_plot = receipt_clients.sort_values("_VALOR")
+                fig = px.bar(receipt_plot, x="_VALOR", y="Nome", orientation="h", title="Principais Clientes / Contrapartes por Recebimento", custom_data=["Cliente"])
+                fig.update_traces(marker_color=BLUE, text=receipt_plot["_VALOR"].map(compact_currency_label), textposition="outside", cliponaxis=False,
+                                  hovertemplate="%{customdata[0]}<br>Recebido: R$ %{x:,.2f}<extra></extra>")
+                apply_brl_axis(fig, "x"); hide_value_axis(fig, "x")
+                st.plotly_chart(plot_layout(fig, 560, legend_bottom=False), width="stretch", config={"displayModeBar": False})
+
+            client_display = clients_df.head(40).copy()
+            client_display["Faturamento"] = client_display["Faturamento"].map(brl)
+            client_display["Participação"] = client_display["Participação"].map(pct)
+            client_display["Ticket Médio"] = client_display["Ticket Médio"].map(brl)
+            st.dataframe(client_display, width="stretch", hide_index=True, height=430)
+            st.caption("Os nomes da base de faturamento e da base de recebimentos podem possuir grafias diferentes; por isso, os rankings são apresentados separadamente.")
+
+# =========================================================
+# PONTOS DE ATENÇÃO E AÇÕES
+# =========================================================
+with tab_actions:
+    section_header("Pontos de atenção e sugestões de melhoria", "Diagnóstico dinâmico baseado no período selecionado", "Plano de ação")
+    analysis_df = pd.DataFrame(management_analysis)
+    critical_count = int(analysis_df["Prioridade"].isin(["Crítica", "Alta"]).sum())
+    medium_count = int((analysis_df["Prioridade"] == "Média").sum())
+    positive_count = int((analysis_df["Prioridade"] == "Positiva").sum())
+    a1, a2, a3, a4 = st.columns(4)
+    with a1: card("Prioridades altas", str(critical_count), "Itens críticos ou de alta prioridade", RED)
+    with a2: card("Prioridades médias", str(medium_count), "Itens para acompanhamento gerencial", ORANGE)
+    with a3: card("Oportunidades positivas", str(positive_count), "Indicadores favoráveis identificados", GREEN)
+    with a4: card("Total de recomendações", str(len(analysis_df)), "Diagnóstico do período", NAVY)
+
+    left, right = st.columns(2)
+    attention = [x for x in management_analysis if x["Prioridade"] != "Positiva"]
+    positives = [x for x in management_analysis if x["Prioridade"] == "Positiva"]
+    with left:
+        st.markdown("#### Pontos de atenção")
+        for item in attention[::2]:
+            management_card(item["Prioridade"], item["Tema"], item["Evidência"], item["Ação sugerida"])
+    with right:
+        st.markdown("#### Ações e oportunidades")
+        for item in attention[1::2]:
+            management_card(item["Prioridade"], item["Tema"], item["Evidência"], item["Ação sugerida"])
+        for item in positives:
+            management_card(item["Prioridade"], item["Tema"], item["Evidência"], item["Ação sugerida"], positive=True)
+
+    section_header("Plano de ação exportável", "Use a tabela abaixo como pauta de reunião e acompanhamento")
+    st.dataframe(analysis_df, width="stretch", hide_index=True, height=440)
+    st.download_button(
+        "Exportar plano de ação",
+        data=dataframe_download(analysis_df, "Plano de Ação"),
+        file_name=f"plano_de_acao_kpis_{start_month}_{end_month}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        width="content",
     )
 
 # =========================================================
@@ -1109,4 +1541,4 @@ with tab_quality:
         unsafe_allow_html=True,
     )
 
-st.caption("Painel Executivo de KPIs · Desenvolvido para uso gerencial da First Medical · Dados processados localmente no app")
+st.caption("FIRST MEDICAL · Painel Executivo de Performance · Controladoria · Dados processados localmente no app")
