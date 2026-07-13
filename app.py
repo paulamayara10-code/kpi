@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import io
 import os
 import re
@@ -71,7 +72,7 @@ st.markdown(
     <style>
     :root {{ --navy:{NAVY}; --blue:{BLUE}; --cyan:{CYAN}; --green:{GREEN}; --light:{LIGHT}; }}
     .stApp {{ background:{LIGHT}; }}
-    .block-container {{ max-width:1540px; padding-top:.85rem; padding-bottom:2.3rem; }}
+    .block-container {{ max-width:1540px; padding-top:1.85rem !important; padding-bottom:2.3rem; }}
     [data-testid="stSidebar"] {{ background:linear-gradient(180deg,#071B33 0%,#0B2F55 100%); border-right:0; }}
     [data-testid="stSidebar"] .block-container {{ padding-top:1rem; }}
     [data-testid="stSidebar"] label, [data-testid="stSidebar"] p, [data-testid="stSidebar"] span {{ color:#EAF4FB; }}
@@ -100,13 +101,13 @@ st.markdown(
 
     .dashboard-hero {{
         position:relative; overflow:hidden; background:linear-gradient(120deg,{NAVY} 0%,#0E3762 58%,#1B5D97 120%);
-        color:white; border-radius:24px; padding:24px 28px; margin-bottom:16px;
+        color:white; border-radius:24px; padding:29px 28px 25px; margin:7px 0 16px;
         box-shadow:0 18px 38px rgba(7,27,51,.18);
     }}
     .dashboard-hero::after {{ content:""; position:absolute; width:320px; height:320px; border-radius:50%; right:-130px; top:-185px; background:rgba(255,255,255,.055); }}
     .hero-grid {{ position:relative; z-index:2; display:flex; align-items:center; justify-content:space-between; gap:20px; }}
     .hero-brand {{ font-size:.72rem; font-weight:900; letter-spacing:.28em; color:#B9D9F0; text-transform:uppercase; }}
-    .dashboard-hero h1 {{ font-size:clamp(1.42rem,2.2vw,2rem); line-height:1.15; margin:7px 0 6px 0; letter-spacing:-.025em; }}
+    .dashboard-hero h1 {{ font-size:clamp(1.48rem,2.25vw,2.06rem); line-height:1.18; margin:9px 0 2px 0; letter-spacing:-.025em; padding-top:1px; }}
     .dashboard-hero p {{ margin:0; opacity:.82; font-size:.88rem; }}
     .hero-chips {{ display:flex; flex-wrap:wrap; gap:7px; justify-content:flex-end; }}
     .hero-chip {{ background:rgba(255,255,255,.11); border:1px solid rgba(255,255,255,.20); border-radius:999px; padding:7px 11px; font-size:.71rem; font-weight:800; white-space:nowrap; }}
@@ -157,6 +158,20 @@ st.markdown(
     [data-testid="stSidebar"] hr {{ margin:.85rem 0; }}
     [data-testid="stTabs"] button {{ font-weight:800; color:#475467; }}
     [data-testid="stTabs"] button[aria-selected="true"] {{ color:{NAVY}; border-bottom-color:{BLUE}; }}
+
+    .clean-table-wrap {{
+        width:100%; overflow:auto; background:#FFFFFF; border:1px solid #DCE7F0;
+        border-radius:17px; box-shadow:0 8px 22px rgba(7,27,51,.045);
+    }}
+    table.clean-table {{ width:100%; border-collapse:separate; border-spacing:0; font-size:.76rem; color:#344054; }}
+    table.clean-table thead th {{
+        position:sticky; top:0; z-index:2; background:linear-gradient(180deg,#0B2F55 0%,#123E68 100%);
+        color:#FFFFFF; text-align:left; font-weight:850; padding:11px 12px; white-space:nowrap; border:0;
+    }}
+    table.clean-table tbody td {{ padding:10px 12px; border:0; white-space:nowrap; background:#FFFFFF; }}
+    table.clean-table tbody tr:nth-child(even) td {{ background:#F7FAFD; }}
+    table.clean-table tbody tr:hover td {{ background:#EDF5FB; }}
+    .clean-table-note {{ color:#667085; font-size:.69rem; margin:6px 2px 0; }}
 
     @media(max-width:900px) {{
       .block-container {{ padding-left:.75rem; padding-right:.75rem; }}
@@ -255,7 +270,10 @@ def compact_money(value: float) -> str:
 
 
 def pct(value: float) -> str:
-    return f"{float(value or 0) * 100:,.1f}%".replace(",", "X").replace(".", ",").replace("X", ".")
+    number = float(value or 0)
+    if 0 < abs(number) < 0.0005:
+        return "<0,1%" if number > 0 else ">-0,1%"
+    return f"{number * 100:,.1f}%".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def safe_div(a: float, b: float) -> float:
@@ -356,7 +374,7 @@ def plot_layout(fig: go.Figure, height: int = 390, legend_bottom: bool = True) -
     )
     fig.update_layout(
         height=height,
-        margin=dict(l=20, r=70, t=92, b=70 if legend_bottom else 30),
+        margin=dict(l=20, r=76, t=96, b=70 if legend_bottom else 30),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="#FBFDFF",
         font=dict(family="Arial", color="#344054", size=12),
@@ -435,6 +453,81 @@ def add_point_labels(
 def short_label(value: object, limit: int = 34) -> str:
     text = str(value or "Não informado").strip()
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def clean_table(df: pd.DataFrame, height: int = 360, max_rows: int = 250) -> None:
+    """Tabela executiva sem linhas de grade, com cabeçalho fixo e rolagem."""
+    if df is None or df.empty:
+        st.info("Não há registros para os filtros selecionados.")
+        return
+    view = df.head(max_rows).copy()
+    view = view.where(pd.notna(view), "")
+    html_table = view.to_html(index=False, escape=True, classes="clean-table", border=0)
+    st.markdown(
+        f"<div class='clean-table-wrap' style='max-height:{height}px'>{html_table}</div>",
+        unsafe_allow_html=True,
+    )
+    if len(df) > max_rows:
+        st.markdown(
+            f"<div class='clean-table-note'>Exibindo os {max_rows} primeiros registros de {len(df):,}.</div>".replace(",", "."),
+            unsafe_allow_html=True,
+        )
+
+
+def line_result_lollipop(df: pd.DataFrame, title: str) -> go.Figure:
+    """Resultado por linha em formato lollipop, mais limpo que barras largas."""
+    p = df.sort_values("Resultado Direto de Caixa").copy()
+    fig = go.Figure()
+    for _, row in p.iterrows():
+        value = float(row["Resultado Direto de Caixa"])
+        color = BLUE if value >= 0 else RED
+        fig.add_shape(
+            type="line", x0=0, x1=value, y0=row["Linha"], y1=row["Linha"],
+            line=dict(color=color, width=5), layer="below",
+        )
+    fig.add_trace(go.Scatter(
+        x=p["Resultado Direto de Caixa"], y=p["Linha"], mode="markers+text",
+        marker=dict(size=18, color=[BLUE if v >= 0 else RED for v in p["Resultado Direto de Caixa"]],
+                    line=dict(color=WHITE, width=2)),
+        text=p["Resultado Direto de Caixa"].map(compact_money),
+        textposition=["middle right" if v >= 0 else "middle left" for v in p["Resultado Direto de Caixa"]],
+        textfont=dict(size=10, color=NAVY), cliponaxis=False,
+        customdata=p[["Linha"]],
+        hovertemplate="%{customdata[0]}<br>Resultado: R$ %{x:,.2f}<extra></extra>",
+        showlegend=False,
+    ))
+    fig.add_vline(x=0, line_color="#AFC4D6", line_width=1.4)
+    fig.update_layout(title=title, showlegend=False)
+    hide_value_axis(fig, "x")
+    return fig
+
+
+def line_revenue_cost_dumbbell(df: pd.DataFrame, title: str) -> go.Figure:
+    """Receitas e custos por linha em gráfico dumbbell para comparação direta."""
+    p = df.sort_values("Receitas Recebidas").copy()
+    fig = go.Figure()
+    for _, row in p.iterrows():
+        fig.add_shape(
+            type="line", x0=float(row["Custos Diretos Pagos"]), x1=float(row["Receitas Recebidas"]),
+            y0=row["Linha"], y1=row["Linha"], line=dict(color="#C6D6E4", width=5), layer="below",
+        )
+    fig.add_trace(go.Scatter(
+        x=p["Receitas Recebidas"], y=p["Linha"], mode="markers+text", name="Receitas",
+        marker=dict(size=17, color=BLUE, line=dict(color=WHITE, width=2)),
+        text=p["Receitas Recebidas"].map(compact_money), textposition="top center",
+        textfont=dict(size=9, color=NAVY), cliponaxis=False,
+        hovertemplate="%{y}<br>Receitas: R$ %{x:,.2f}<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=p["Custos Diretos Pagos"], y=p["Linha"], mode="markers+text", name="Despesas",
+        marker=dict(size=17, color=RED, line=dict(color=WHITE, width=2)),
+        text=p["Custos Diretos Pagos"].map(compact_money), textposition="bottom center",
+        textfont=dict(size=9, color=RED), cliponaxis=False,
+        hovertemplate="%{y}<br>Despesas: R$ %{x:,.2f}<extra></extra>",
+    ))
+    fig.update_layout(title=title)
+    hide_value_axis(fig, "x")
+    return fig
 
 
 def dataframe_download(df: pd.DataFrame, name: str) -> bytes:
@@ -788,6 +881,9 @@ def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     custos["_EMPRESA_N"] = custos["EMPRESA"].map(norm)
     custos["_GRUPO_N"] = custos["GRUPO"].map(norm)
     custos["_CC_N"] = custos["CENTRO DE CUSTOS"].map(norm)
+    # Regra de gestão: toda visão departamental usa exclusivamente CENTRO DE CUSTOS.
+    # A coluna de rateio é removida para impedir uso acidental nos cálculos e filtros.
+    custos = custos.drop(columns=["CENTRO DE CUSTOS RATEAO"], errors="ignore")
     custos["_LINHA_DIRETA"] = custos["_CC_N"].where(custos["_CC_N"].isin(LINES), "NAO CLASSIFICADA")
     custos = custos[custos["_EMPRESA_N"].isin(["DESPESAS", "RECEITA"])].copy()
 
@@ -1233,6 +1329,7 @@ def seller_performance(
     out = out[out["Faturamento"] > 0].copy()
     out["Desvio"] = out["Faturamento"] - out["Meta"]
     out["Atingimento"] = np.where(out["Meta"] != 0, out["Faturamento"] / out["Meta"], 0)
+    out = out[out["Atingimento"] > 0].copy()
     out["Status"] = np.select(
         [out["Atingimento"] >= 1, out["Atingimento"] >= .9],
         ["Meta atingida", "Próximo da meta"],
@@ -1457,7 +1554,7 @@ with st.sidebar:
         scope_choice = user["linha"] if user["linha"] in LINES else "VENDAS"
 
     st.markdown("#### Navegação")
-    pages = ["Dashboard", "Desempenho & metas", "Recebimentos & inadimplência", "Clientes", "Produtos", "Custos diretos"]
+    pages = ["Dashboard", "Desempenho & metas", "Recebimentos & inadimplência", "Clientes", "Produtos", "Centro de custos"]
     if is_director:
         pages.insert(1, "Linhas de negócio")
     page = st.radio("Navegação", pages, label_visibility="collapsed")
@@ -1548,34 +1645,13 @@ if page == "Dashboard":
             "Linhas exibidas", LINES, default=LINES, format_func=line_label, key="filter_dashboard_lines"
         )
         dashboard_lines = lines_table[lines_table["Código"].isin(dash_selected_codes)].copy() if dash_selected_codes else lines_table.copy()
-        l1, l2 = st.columns([1.25, 1])
+        l1, l2 = st.columns([1.05, 1.25])
         with l1:
-            chart_df = dashboard_lines.sort_values("Resultado Direto de Caixa")
-            fig = go.Figure(go.Bar(
-                x=chart_df["Resultado Direto de Caixa"],
-                y=chart_df["Linha"],
-                orientation="h",
-                marker_color=[LINE_COLORS.get(code, BLUE) if value >= 0 else CYAN for code, value in zip(chart_df["Código"], chart_df["Resultado Direto de Caixa"])],
-                text=chart_df["Resultado Direto de Caixa"].map(compact_money),
-                textposition=["outside" if value >= 0 else "inside" for value in chart_df["Resultado Direto de Caixa"]],
-                textfont_color=[DARK if value >= 0 else WHITE for value in chart_df["Resultado Direto de Caixa"]],
-                insidetextanchor="middle",
-                cliponaxis=False,
-                customdata=chart_df[["Linha"]],
-                hovertemplate="%{customdata[0]}<br>Resultado: R$ %{x:,.2f}<extra></extra>",
-            ))
-            fig.update_layout(title="Resultado direto de caixa por linha", showlegend=False)
-            hide_value_axis(fig, "x")
-            st.plotly_chart(plot_layout(fig, 410, False), width="stretch", config={"displayModeBar": False})
+            fig = line_result_lollipop(dashboard_lines, "Resultado direto por linha")
+            st.plotly_chart(plot_layout(fig, 405, False), width="stretch", config={"displayModeBar": False})
         with l2:
-            fig = go.Figure()
-            fig.add_bar(x=dashboard_lines["Linha"], y=dashboard_lines["Receitas Recebidas"], name="Receitas diretas", marker_color=BLUE,
-                        text=dashboard_lines["Receitas Recebidas"].map(compact_money), textposition="outside", cliponaxis=False, textfont=dict(size=10, color=NAVY))
-            fig.add_bar(x=dashboard_lines["Linha"], y=dashboard_lines["Custos Diretos Pagos"], name="Custos diretos", marker_color=RED,
-                        text=dashboard_lines["Custos Diretos Pagos"].map(compact_money), textposition="inside", insidetextanchor="end", cliponaxis=False, textfont=dict(size=10, color=WHITE))
-            fig.update_layout(title="Receitas diretas x custos diretos", barmode="group")
-            hide_value_axis(fig, "y")
-            st.plotly_chart(plot_layout(fig, 410), width="stretch", config={"displayModeBar": False})
+            fig = line_revenue_cost_dumbbell(dashboard_lines, "Receitas x despesas diretas")
+            st.plotly_chart(plot_layout(fig, 405), width="stretch", config={"displayModeBar": False})
 
         section_header("Desempenho comercial", "Realizado, meta e projeção")
         s1, s2, s3, s4 = st.columns(4)
@@ -1691,7 +1767,7 @@ elif page == "Desempenho & metas":
         hide_value_axis(fig, "y")
         st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
     with c2:
-        att = perf_monthly.copy()
+        att = perf_monthly[perf_monthly["Atingimento"] > 0].copy()
         colors = [BLUE if value >= 1 else CYAN for value in att["Atingimento"]]
         fig = go.Figure(go.Bar(
             x=att["Mês Texto"], y=att["Atingimento"], marker_color=colors,
@@ -1712,12 +1788,13 @@ elif page == "Desempenho & metas":
             "Margem Direta de Caixa", "Inadimplência"
         ]].copy()
         score["Inadimplência / faturamento"] = np.where(score["Faturamento"] != 0, score["Inadimplência"] / score["Faturamento"], 0)
+        score = score[score["Atingimento da Meta"] > 0].copy()
         score["Status"] = np.select(
             [score["Atingimento da Meta"] >= 1, score["Atingimento da Meta"] >= .9],
             ["Meta atingida", "Próximo da meta"], default="Abaixo da meta"
         )
 
-        chart = line_perf.sort_values("Atingimento da Meta")
+        chart = line_perf[line_perf["Atingimento da Meta"] > 0].sort_values("Atingimento da Meta")
         fig = go.Figure(go.Bar(
             x=chart["Atingimento da Meta"], y=chart["Linha"], orientation="h",
             marker_color=[BLUE if value >= 1 else CYAN for value in chart["Atingimento da Meta"]],
@@ -1733,7 +1810,7 @@ elif page == "Desempenho & metas":
             score_view[col] = score_view[col].map(brl)
         for col in ["Atingimento da Meta", "Conversão em Caixa", "Margem Direta de Caixa", "Inadimplência / faturamento"]:
             score_view[col] = score_view[col].map(pct)
-        st.dataframe(score_view, width="stretch", hide_index=True, height=255)
+        clean_table(score_view, height=255)
 
     section_header("Desempenho da equipe", "Faturamento individual frente à meta")
     seller_perf = seller_performance(fat, metas, start_month, end_month, scope_choice)
@@ -1772,7 +1849,7 @@ elif page == "Desempenho & metas":
         seller_view["Meta"] = seller_view["Meta"].map(brl)
         seller_view["Atingimento"] = seller_view["Atingimento"].map(pct)
         seller_view["Desvio"] = seller_view["Desvio"].map(brl)
-        st.dataframe(seller_view, width="stretch", hide_index=True, height=360)
+        clean_table(seller_view, height=360)
         st.download_button(
             "Exportar desempenho da equipe", dataframe_download(seller_export, "Desempenho"),
             file_name=f"desempenho_metas_{scope_choice.lower()}_{start_month}_{end_month}.xlsx",
@@ -1810,33 +1887,13 @@ elif page == "Linhas de negócio" and is_director:
         with cols[idx % len(cols)]:
             card(row["Linha"], brl(row["Resultado Direto de Caixa"]), f"Margem: {pct(row['Margem Direta de Caixa'])}", LINE_COLORS[row["Código"]] if row["Resultado Direto de Caixa"] >= 0 else CYAN)
 
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns([1.2, 1])
     with c1:
-        p = lines_view.sort_values("Receitas Recebidas")
-        fig = go.Figure(go.Bar(
-            x=p["Receitas Recebidas"], y=p["Linha"], orientation="h",
-            marker_color=[LINE_COLORS.get(code, BLUE) for code in p["Código"]],
-            text=p["Receitas Recebidas"].map(compact_money), textposition="outside", cliponaxis=False,
-            hovertemplate="%{y}<br>Receita direta: R$ %{x:,.2f}<extra></extra>",
-        ))
-        fig.update_layout(title="Receitas diretas por linha", showlegend=False)
-        hide_value_axis(fig, "x")
-        st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
+        fig = line_revenue_cost_dumbbell(lines_view, "Receitas x despesas por linha")
+        st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
     with c2:
-        p = lines_view.sort_values("Resultado Direto de Caixa")
-        fig = go.Figure(go.Bar(
-            x=p["Resultado Direto de Caixa"], y=p["Linha"], orientation="h",
-            marker_color=[LINE_COLORS.get(code, BLUE) if value >= 0 else CYAN for code, value in zip(p["Código"], p["Resultado Direto de Caixa"])],
-            text=p["Resultado Direto de Caixa"].map(compact_money),
-            textposition=["outside" if value >= 0 else "inside" for value in p["Resultado Direto de Caixa"]],
-            textfont_color=[NAVY if value >= 0 else WHITE for value in p["Resultado Direto de Caixa"]],
-            insidetextanchor="middle", cliponaxis=False,
-            hovertemplate="%{y}<br>Resultado: R$ %{x:,.2f}<extra></extra>",
-        ))
-        fig.update_layout(title="Resultado direto por linha", showlegend=False)
-        hide_value_axis(fig, "x")
-        st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
-
+        fig = line_result_lollipop(lines_view, "Resultado direto por linha")
+        st.plotly_chart(plot_layout(fig, 430, False), width="stretch", config={"displayModeBar": False})
     export_lines = lines_view.drop(columns=["Código"]).rename(columns={
         "Receitas Recebidas": "Receitas Operacionais Diretas",
         "Custos Diretos Pagos": "Custos Operacionais Diretos",
@@ -1848,7 +1905,7 @@ elif page == "Linhas de negócio" and is_director:
     for c in ["Margem Direta de Caixa", "Margem de Contribuição Direta", "Atingimento da Meta", "Atingimento Projetado", "Conversão em Caixa"]:
         if c in view.columns:
             view[c] = view[c].map(pct)
-    st.dataframe(view, width="stretch", hide_index=True, height=280)
+    clean_table(view, height=280)
     st.download_button(
         "Exportar comparativo",
         dataframe_download(export_lines, "Linhas"),
@@ -1945,7 +2002,7 @@ elif page == "Recebimentos & inadimplência":
             crm_view = crm_summary[["Gerente", "Linha", "Clientes", "Títulos", "Valor", "Maior atraso"]].copy()
             crm_view["Valor"] = crm_view["Valor"].map(brl)
             st.markdown("**Resumo original exportado pelo CRM de cobrança**")
-            st.dataframe(crm_view, width="stretch", hide_index=True)
+            clean_table(crm_view, height=260)
 
         detail = inad_page[["_CLIENTE", "_TITULO", "_VENCIMENTO", "_DIAS_ATRASO", "_FAIXA", "_VALOR_VENCIDO", "_LINHA", "_GERENTE"]].copy()
         detail.columns = ["Cliente", "Título", "Vencimento", "Dias de atraso", "Faixa", "Valor vencido", "Linha", "Gerente"]
@@ -1953,7 +2010,7 @@ elif page == "Recebimentos & inadimplência":
         detail_view = detail.sort_values("Valor vencido", ascending=False).copy()
         detail_view["Valor vencido"] = detail_view["Valor vencido"].map(brl)
         detail_view["Vencimento"] = pd.to_datetime(detail_view["Vencimento"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
-        st.dataframe(detail_view, width="stretch", hide_index=True, height=370)
+        clean_table(detail_view, height=370)
         st.download_button("Exportar inadimplência do escopo", dataframe_download(detail, "Inadimplência"),
                            file_name=f"inadimplencia_{scope_choice}_{start_month}_{end_month}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -2023,7 +2080,7 @@ elif page == "Clientes":
         view = billed.head(100).rename(columns={client_col: "Cliente"}).copy()
         view["Faturamento"] = view["Faturamento"].map(brl)
         view["Participação"] = view["Participação"].map(pct)
-        st.dataframe(view, width="stretch", hide_index=True, height=430)
+        clean_table(view, height=430)
 
 # =========================================================
 # PRODUTOS
@@ -2107,7 +2164,7 @@ elif page == "Produtos":
                 table_view["Participação"] = table_view["Participação"].map(pct)
                 table_view["Quantidade"] = table_view["Quantidade"].map(lambda v: f"{v:,.0f}".replace(",", "."))
                 table_view["Preço médio"] = table_view["Preço médio"].map(brl)
-                st.dataframe(table_view, width="stretch", hide_index=True, height=470)
+                clean_table(table_view, height=470)
                 st.download_button(
                     "Exportar produtos",
                     dataframe_download(table, "Produtos"),
@@ -2118,70 +2175,165 @@ elif page == "Produtos":
 # =========================================================
 # PREÇOS E RENTABILIDADE ESTIMADA
 # =========================================================
-elif page == "Custos diretos":
-    section_header("Custos diretos", "Fornecedores e naturezas", scope_text)
-    if cost_scope.empty:
-        st.info("Não foram encontrados custos diretos para o escopo selecionado.")
+elif page == "Centro de custos":
+    section_header("Centro de custos", badge=scope_text)
+
+    cc_base = period_filter(custos, start_month, end_month).copy()
+    cc_base["Movimento"] = np.where(cc_base["_EMPRESA_N"] == "RECEITA", "Receita", "Despesa")
+    cc_base["Classificação"] = np.where(
+        cc_base["_GRUPO_N"].str.contains("NAO OPERACIONAIS", na=False),
+        "Não operacional", "Operacional",
+    )
+    cc_base["Departamento"] = cc_base["CENTRO DE CUSTOS"].astype(str).str.strip()
+
+    # Para gestores, o departamento é sempre o centro de custo direto da própria linha.
+    # Não existe uso de CENTRO DE CUSTOS RATEAO nesta página nem nos cálculos.
+    if scope_choice != "CONSOLIDADO":
+        cc_base = cc_base[cc_base["_CC_N"] == scope_choice].copy()
+
+    f1, f2, f3, f4 = st.columns([1.15, 1.1, 1.15, .75])
+    movement_filter = f1.multiselect(
+        "Movimento", ["Receita", "Despesa"], default=["Receita", "Despesa"], key="cc_movement"
+    )
+    class_filter = f2.multiselect(
+        "Classificação", ["Operacional", "Não operacional"],
+        default=["Operacional", "Não operacional"], key="cc_classification"
+    )
+    department_options = sorted(cc_base["Departamento"].dropna().unique())
+    if is_director:
+        department_filter = f3.multiselect("Departamento", department_options, key="cc_department")
     else:
-        supplier_col = optional_col(cost_scope, ["Codigo-Nome do Fornecedor", "FORNECEDOR", "NOME DO FORNECEDOR"]) or "Codigo-Nome do Fornecedor"
-        cost_base = cost_scope.copy()
-        f1, f2, f3 = st.columns([1.3, 1.2, .6])
-        supplier_search = f1.text_input("Buscar fornecedor", placeholder="Nome ou código", key="filter_cost_supplier")
-        nature_values = sorted(cost_base["PAI"].dropna().astype(str).unique())
-        selected_natures = f2.multiselect("Natureza", nature_values, key="filter_cost_nature")
-        top_n = f3.selectbox("Exibir", [10, 15, 20, 30], index=1, key="filter_cost_top")
-        if supplier_search:
-            cost_base = cost_base[cost_base[supplier_col].astype(str).str.contains(supplier_search, case=False, na=False)]
-        if selected_natures:
-            cost_base = cost_base[cost_base["PAI"].astype(str).isin(selected_natures)]
+        department_filter = [line_label(scope_choice)]
+        f3.text_input("Departamento", value=line_label(scope_choice), disabled=True, key="cc_department_locked")
+    top_n = f4.selectbox("Exibir", [8, 10, 15, 20, 30], index=2, key="cc_top")
 
-        if cost_base.empty:
-            st.info("Nenhum custo encontrado com os filtros selecionados.")
-        else:
-            total_cost = float(cost_base["_VALOR"].sum())
-            suppliers = cost_base.groupby(supplier_col, as_index=False).agg(Valor=("_VALOR", "sum"), Lançamentos=("_VALOR", "size")).sort_values("Valor", ascending=False)
-            nature = cost_base.groupby("PAI", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False)
-            months = cost_base.groupby("_MES", as_index=False)["_VALOR"].sum()
-            months["Mês"] = months["_MES"].map(month_label)
+    f5, f6 = st.columns([1.3, 1.2])
+    party_search = f5.text_input("Buscar fornecedor ou cliente", placeholder="Nome ou código", key="cc_party")
+    nature_options = sorted(cc_base["PAI"].dropna().astype(str).unique())
+    nature_filter = f6.multiselect("Natureza", nature_options, key="cc_nature")
 
-            c1, c2, c3, c4 = st.columns(4)
-            with c1: card("Custos pagos", brl(total_cost), "Filtro atual", RED)
-            with c2: card("Fornecedores", f"{len(suppliers):,}".replace(",", "."), "Com pagamento direto", BLUE)
-            with c3: card("Maior fornecedor", brl(float(suppliers.iloc[0]["Valor"])), short_label(suppliers.iloc[0][supplier_col], 34), NAVY)
-            with c4: card("Ticket médio", brl(safe_div(total_cost, float(suppliers["Lançamentos"].sum()))), "Por lançamento", TEAL)
+    if movement_filter:
+        cc_base = cc_base[cc_base["Movimento"].isin(movement_filter)]
+    if class_filter:
+        cc_base = cc_base[cc_base["Classificação"].isin(class_filter)]
+    if department_filter and is_director:
+        cc_base = cc_base[cc_base["Departamento"].isin(department_filter)]
+    if nature_filter:
+        cc_base = cc_base[cc_base["PAI"].astype(str).isin(nature_filter)]
 
-            p1, p2 = st.columns(2)
-            with p1:
-                p = nature.head(top_n).sort_values("_VALOR").copy()
-                p["Natureza"] = p["PAI"].map(lambda x: short_label(x, 36))
-                fig = px.bar(p, x="_VALOR", y="Natureza", orientation="h", title="Naturezas de custo", custom_data=["PAI"])
-                fig.update_traces(marker_color=RED, text=p["_VALOR"].map(compact_money), textposition="outside", cliponaxis=False,
-                                  hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
-                hide_value_axis(fig, "x")
-                st.plotly_chart(plot_layout(fig, 520, False), width="stretch", config={"displayModeBar": False})
-            with p2:
-                p = suppliers.head(top_n).sort_values("Valor").copy()
-                p["Fornecedor"] = p[supplier_col].map(lambda x: short_label(x, 38))
-                fig = px.bar(p, x="Valor", y="Fornecedor", orientation="h", title="Fornecedores por pagamento", custom_data=[supplier_col])
-                fig.update_traces(marker_color=RED, text=p["Valor"].map(compact_money), textposition="outside", cliponaxis=False,
-                                  hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
-                hide_value_axis(fig, "x")
-                st.plotly_chart(plot_layout(fig, 520, False), width="stretch", config={"displayModeBar": False})
+    party_col = optional_col(cc_base, ["Codigo-Nome do Fornecedor", "FORNECEDOR", "NOME DO FORNECEDOR"]) or "Codigo-Nome do Fornecedor"
+    if party_search:
+        cc_base = cc_base[cc_base[party_col].astype(str).str.contains(party_search, case=False, na=False)]
 
-            fig = px.bar(months, x="Mês", y="_VALOR", title="Custos diretos por mês")
-            fig.update_traces(marker_color=RED, text=months["_VALOR"].map(compact_money), textposition="outside", cliponaxis=False)
-            hide_value_axis(fig, "y")
-            st.plotly_chart(plot_layout(fig, 380, False), width="stretch", config={"displayModeBar": False})
+    if cc_base.empty:
+        st.info("Nenhum lançamento encontrado para os filtros selecionados.")
+    else:
+        total_revenue = float(cc_base.loc[cc_base["Movimento"] == "Receita", "_VALOR"].sum())
+        total_expense = float(cc_base.loc[cc_base["Movimento"] == "Despesa", "_VALOR"].sum())
+        net_result = total_revenue - total_expense
+        departments = int(cc_base["Departamento"].nunique())
 
-            table = suppliers.rename(columns={supplier_col: "Fornecedor"}).copy()
-            table["Participação"] = np.where(total_cost != 0, table["Valor"] / total_cost, 0)
-            table_view = table.copy()
-            table_view["Valor"] = table_view["Valor"].map(brl)
-            table_view["Participação"] = table_view["Participação"].map(pct)
-            st.dataframe(table_view, width="stretch", hide_index=True, height=420)
-            st.download_button(
-                "Exportar custos diretos",
-                dataframe_download(table, "Custos Diretos"),
-                file_name=f"custos_diretos_{scope_choice}_{start_month}_{end_month}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        k1, k2, k3, k4 = st.columns(4)
+        with k1: card("Receitas", brl(total_revenue), "Lançamentos recebidos", BLUE)
+        with k2: card("Despesas", brl(total_expense), "Pagamentos realizados", RED)
+        with k3: card("Saldo", brl(net_result), "Receitas menos despesas", BLUE if net_result >= 0 else RED)
+        with k4: card("Centros de custos", f"{departments:,}".replace(",", "."), "Departamentos no filtro", NAVY)
+
+        monthly = (
+            cc_base.groupby(["_MES", "Movimento"], as_index=False)["_VALOR"].sum()
+            .pivot(index="_MES", columns="Movimento", values="_VALOR").fillna(0).reset_index()
+        )
+        for col in ["Receita", "Despesa"]:
+            if col not in monthly:
+                monthly[col] = 0.0
+        monthly["Saldo"] = monthly["Receita"] - monthly["Despesa"]
+        monthly["Mês"] = monthly["_MES"].map(month_label)
+
+        c1, c2 = st.columns([1.25, 1])
+        with c1:
+            fig = go.Figure()
+            fig.add_bar(
+                x=monthly["Mês"], y=monthly["Receita"], name="Receitas", marker_color=BLUE,
+                text=monthly["Receita"].map(compact_money), textposition="outside", cliponaxis=False,
             )
+            fig.add_bar(
+                x=monthly["Mês"], y=monthly["Despesa"], name="Despesas", marker_color=RED,
+                text=monthly["Despesa"].map(compact_money), textposition="inside", insidetextanchor="end",
+                textfont=dict(color=WHITE), cliponaxis=False,
+            )
+            fig.add_scatter(
+                x=monthly["Mês"], y=monthly["Saldo"], name="Saldo", mode="lines+markers",
+                line=dict(color=NAVY, width=3), marker=dict(size=8),
+            )
+            add_point_labels(fig, monthly["Mês"], monthly["Saldo"], monthly["Saldo"].map(compact_money), color=NAVY)
+            fig.update_layout(title="Movimento mensal por centro de custos", barmode="group")
+            hide_value_axis(fig, "y")
+            st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+
+        with c2:
+            by_department = (
+                cc_base.groupby(["Departamento", "Movimento"], as_index=False)["_VALOR"].sum()
+                .pivot(index="Departamento", columns="Movimento", values="_VALOR").fillna(0).reset_index()
+            )
+            for col in ["Receita", "Despesa"]:
+                if col not in by_department:
+                    by_department[col] = 0.0
+            by_department["Movimentação"] = by_department["Receita"] + by_department["Despesa"]
+            by_department = by_department.sort_values("Movimentação", ascending=False).head(top_n).sort_values("Movimentação")
+            fig = go.Figure()
+            fig.add_bar(
+                x=by_department["Receita"], y=by_department["Departamento"], orientation="h",
+                name="Receitas", marker_color=BLUE, text=by_department["Receita"].map(compact_money),
+                textposition="outside", cliponaxis=False,
+            )
+            fig.add_bar(
+                x=-by_department["Despesa"], y=by_department["Departamento"], orientation="h",
+                name="Despesas", marker_color=RED, text=by_department["Despesa"].map(compact_money),
+                textposition="outside", cliponaxis=False,
+            )
+            fig.add_vline(x=0, line_color="#AFC4D6", line_width=1.2)
+            fig.update_layout(title="Receitas e despesas por departamento", barmode="relative")
+            hide_value_axis(fig, "x")
+            st.plotly_chart(plot_layout(fig, max(430, 34 * len(by_department)), True), width="stretch", config={"displayModeBar": False})
+
+        p1, p2 = st.columns(2)
+        with p1:
+            revenues = (
+                cc_base[cc_base["Movimento"] == "Receita"].groupby("PAI", as_index=False)["_VALOR"].sum()
+                .sort_values("_VALOR", ascending=False).head(top_n).sort_values("_VALOR")
+            )
+            if not revenues.empty:
+                revenues["Natureza"] = revenues["PAI"].map(lambda x: short_label(x, 38))
+                fig = px.bar(revenues, x="_VALOR", y="Natureza", orientation="h", title="Principais receitas", custom_data=["PAI"])
+                fig.update_traces(marker_color=BLUE, text=revenues["_VALOR"].map(compact_money), textposition="outside", cliponaxis=False,
+                                  hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+                hide_value_axis(fig, "x")
+                st.plotly_chart(plot_layout(fig, 460, False), width="stretch", config={"displayModeBar": False})
+        with p2:
+            expenses = (
+                cc_base[cc_base["Movimento"] == "Despesa"].groupby("PAI", as_index=False)["_VALOR"].sum()
+                .sort_values("_VALOR", ascending=False).head(top_n).sort_values("_VALOR")
+            )
+            if not expenses.empty:
+                expenses["Natureza"] = expenses["PAI"].map(lambda x: short_label(x, 38))
+                fig = px.bar(expenses, x="_VALOR", y="Natureza", orientation="h", title="Principais despesas", custom_data=["PAI"])
+                fig.update_traces(marker_color=RED, text=expenses["_VALOR"].map(compact_money), textposition="outside", cliponaxis=False,
+                                  hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+                hide_value_axis(fig, "x")
+                st.plotly_chart(plot_layout(fig, 460, False), width="stretch", config={"displayModeBar": False})
+
+        detail = cc_base[["_MES", "Departamento", "Movimento", "Classificação", "GRUPO", "PAI", party_col, "_VALOR"]].copy()
+        detail["Mês"] = detail["_MES"].map(month_label)
+        detail = detail.drop(columns=["_MES"]).rename(columns={party_col: "Fornecedor / cliente", "_VALOR": "Valor"})
+        detail = detail[["Mês", "Departamento", "Movimento", "Classificação", "GRUPO", "PAI", "Fornecedor / cliente", "Valor"]]
+        detail = detail.sort_values("Valor", ascending=False)
+        detail_view = detail.copy()
+        detail_view["Valor"] = detail_view["Valor"].map(brl)
+        clean_table(detail_view, height=470, max_rows=300)
+
+        st.download_button(
+            "Exportar centro de custos",
+            dataframe_download(detail, "Centro de Custos"),
+            file_name=f"centro_de_custos_{scope_choice}_{start_month}_{end_month}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
