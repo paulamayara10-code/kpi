@@ -22,7 +22,7 @@ from openpyxl import load_workbook
 # CONFIGURAÇÃO VISUAL
 # =========================================================
 st.set_page_config(
-    page_title="First Intelligence | KPIs de Caixa",
+    page_title="First Intelligence | Business Performance",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -1014,24 +1014,43 @@ def read_optional_table(file_bytes: bytes, filename: str) -> tuple[pd.DataFrame,
 @st.cache_data(show_spinner=False)
 def prepare_inadimplencia(file_bytes: bytes, filename: str, fat: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, object]]:
     df, source_meta = read_optional_table(file_bytes, filename)
-    client_col = optional_col(df, ["Nome do Cliente", "Cliente", "Razão Social", "Razao Social", "Nome", "N Fantasia", "Codigo-Lj-Nome do Cliente"])
-    value_col = optional_col(df, [
-        "Tit Vencidos Valor Corrigido", "Vencidos Corrigidos", "Tit Vencidos Valor Atual",
-        "Vencidos", "Saldo Vencido", "Valor Vencido", "Valor Original", "Saldo", "Valor"
+    client_col = optional_col(df, [
+        "Nome do Cliente", "Nome Cliente", "nome_cliente", "Cliente", "Razão Social", "Razao Social",
+        "Nome", "N Fantasia", "Codigo-Lj-Nome do Cliente"
     ])
-    due_col = optional_col(df, ["Vencto Real", "Vencimento", "Vencto Titulo", "Vencto", "Data Vencimento", "Venc. Real"])
+    value_col = optional_col(df, [
+        "Saldo atual", "saldo_atual", "Tit Vencidos Valor Corrigido", "Vencidos Corrigidos",
+        "Tit Vencidos Valor Atual", "Vencidos", "Saldo Vencido", "Valor Vencido",
+        "Valor Original", "Saldo", "Valor"
+    ])
+    due_col = optional_col(df, ["Vencto Real", "Vencimento", "vencimento", "Vencto Titulo", "Vencto", "Data Vencimento", "Venc. Real"])
+    issue_col = optional_col(df, ["Data Emissão", "Data Emissao", "DT Emissão", "DT Emissao", "dt_emissao", "Emissão", "Emissao"])
     days_col = optional_col(df, ["Dias Atraso", "Dias em Atraso", "Atraso"])
     line_col = optional_col(df, ["Linha", "Linha de Negócio", "Segmento", "Centro de Custos"])
-    manager_col = optional_col(df, ["Gerente", "Gestor", "Responsável", "Responsavel"])
-    title_col = optional_col(df, ["Prf-Numero Parcela", "Prf-Numero-Parcela", "Título", "Titulo", "Documento", "Nota Fiscal", "NF"])
+    manager_col = optional_col(df, ["Gerente", "gerente", "Gestor", "Responsável", "Responsavel"])
+    seller_col = optional_col(df, ["Vendedor", "vendedor", "Vendedor / Representante", "Representante"])
+    title_col = optional_col(df, [
+        "numero_titulo", "Número Título", "Numero Titulo", "Prf-Numero Parcela", "Prf-Numero-Parcela",
+        "Título", "Titulo", "Documento", "Nota Fiscal", "NF"
+    ])
+    prefix_col = optional_col(df, ["prefixo", "Prefixo"])
+    installment_col = optional_col(df, ["parcela", "Parcela"])
+    customer_code_col = optional_col(df, ["cliente_codigo", "Código Cliente", "Codigo Cliente", "Cod Cliente"])
+    store_col = optional_col(df, ["loja", "Loja"])
+
     if client_col is None or value_col is None:
-        raise ValueError("A base de inadimplência precisa conter pelo menos Cliente e Valor vencido.")
+        raise ValueError("A base de inadimplência precisa conter pelo menos Cliente e Saldo atual/Valor vencido.")
 
     x = df.copy()
     x["_CLIENTE"] = x[client_col].fillna("Não informado").astype(str).str.strip()
     x["_CLIENT_KEY"] = x["_CLIENTE"].map(client_key)
     x["_VALOR_VENCIDO"] = to_number(x[value_col])
     x["_VENCIMENTO"] = to_datetime_mixed(x[due_col]) if due_col else pd.NaT
+    x["_EMISSAO"] = to_datetime_mixed(x[issue_col]) if issue_col else pd.NaT
+    x["_VENDEDOR"] = x[seller_col].fillna("Sem vendedor").astype(str).str.strip() if seller_col else "Sem vendedor"
+    x["_COD_CLIENTE"] = x[customer_code_col].fillna("").astype(str).str.replace(r"\.0$", "", regex=True) if customer_code_col else ""
+    x["_LOJA"] = x[store_col].fillna("").astype(str).str.replace(r"\.0$", "", regex=True) if store_col else ""
+
     if days_col:
         x["_DIAS_ATRASO"] = to_number(x[days_col]).astype(int)
     elif due_col:
@@ -1039,7 +1058,22 @@ def prepare_inadimplencia(file_bytes: bytes, filename: str, fat: pd.DataFrame) -
     else:
         x["_DIAS_ATRASO"] = 0
     x["_MES"] = x["_VENCIMENTO"].dt.to_period("M") if due_col else pd.Period(pd.Timestamp.today(), freq="M")
-    x["_TITULO"] = x[title_col].fillna("").astype(str) if title_col else ""
+
+    def _id_text(series: pd.Series) -> pd.Series:
+        return series.fillna("").astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+
+    if title_col:
+        title_txt = _id_text(x[title_col])
+        if prefix_col:
+            prefix_txt = _id_text(x[prefix_col])
+            title_txt = np.where(prefix_txt != "", prefix_txt + "-" + title_txt, title_txt)
+            title_txt = pd.Series(title_txt, index=x.index)
+        if installment_col:
+            installment_txt = _id_text(x[installment_col])
+            title_txt = pd.Series(np.where(installment_txt != "", title_txt.astype(str) + "/" + installment_txt, title_txt), index=x.index)
+        x["_TITULO"] = title_txt.astype(str)
+    else:
+        x["_TITULO"] = ""
 
     manager_map = (
         fat.groupby(["_CLIENT_KEY", "GERENTE", "_LINHA"], as_index=False)["_VALOR"].sum()
@@ -1053,6 +1087,7 @@ def prepare_inadimplencia(file_bytes: bytes, filename: str, fat: pd.DataFrame) -
     if manager_col:
         x["_GERENTE"] = x[manager_col].fillna("Sem gerente").astype(str).str.strip()
         x["_LINHA"] = x["_GERENTE"].map(norm).map(MANAGER_LINE_MAP).fillna("NAO CLASSIFICADA")
+        x["_MATCH_GERENTE"] = "Direto no CRM"
     elif line_col:
         raw_line = x[line_col].map(norm)
         x["_LINHA"] = np.select(
@@ -1060,6 +1095,7 @@ def prepare_inadimplencia(file_bytes: bytes, filename: str, fat: pd.DataFrame) -
             ["MICROTECH", "ENDOSCOPIA", "LOCACAO", "VENDAS"], default="NAO CLASSIFICADA"
         )
         x["_GERENTE"] = x["_LINHA"].map(LINE_MANAGER_MAP).fillna("Sem gerente")
+        x["_MATCH_GERENTE"] = "Direto na linha"
     else:
         cache: dict[str, tuple[str, str, str]] = {}
         for key in x["_CLIENT_KEY"].drop_duplicates():
@@ -1083,12 +1119,28 @@ def prepare_inadimplencia(file_bytes: bytes, filename: str, fat: pd.DataFrame) -
         x["_DIAS_ATRASO"], bins=[-1, 30, 60, 90, 10**9],
         labels=["Até 30 dias", "31 a 60 dias", "61 a 90 dias", "Acima de 90 dias"]
     ).astype(str)
+
+    calculated_summary = (
+        x.groupby(["_GERENTE", "_LINHA"], as_index=False)
+        .agg(
+            Valor=("_VALOR_VENCIDO", "sum"),
+            Clientes=("_CLIENTE", "nunique"),
+            Títulos=("_TITULO", "size"),
+            **{"Maior atraso": ("_DIAS_ATRASO", "max")},
+        )
+        .rename(columns={"_GERENTE": "Gerente", "_LINHA": "Linha"})
+    )
+
     meta: dict[str, object] = {
-        "cliente": client_col, "valor": value_col, "vencimento": due_col or "Não disponível",
-        "linha": line_col or "Mapeada pelo gerente dominante da BASE BI",
+        "cliente": client_col,
+        "valor": value_col,
+        "vencimento": due_col or "Não disponível",
+        "linha": line_col or ("Definida pelo gerente do CRM" if manager_col else "Mapeada pelo gerente dominante da BASE BI"),
         "gerente": manager_col or "Mapeado pelo cliente na BASE BI",
+        "vendedor": seller_col or "Não disponível",
         "sheet": source_meta.get("sheet", ""),
-        "resumo_gerentes": source_meta.get("resumo_gerentes", []),
+        "resumo_gerentes": source_meta.get("resumo_gerentes") or calculated_summary.to_dict("records"),
+        "formato": "CRM CSV" if filename.lower().endswith(".csv") else "Relatório Excel",
     }
     return x, meta
 
@@ -1158,7 +1210,7 @@ def authenticate() -> dict[str, str]:
                 """
                 <div class='login-brand'>
                   <div class='logo'>FIRST <span>INTELLIGENCE</span></div>
-                  <p>Painel gerencial de caixa por perfil</p>
+                  <p>Business Performance por perfil</p>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1505,6 +1557,7 @@ with st.sidebar:
     default_base = first_existing(["BASE BI.xlsx", "BASE BI(1).xlsx", "base_bi.xlsx"])
     default_rev = first_existing(["rev2026 Base bi.xlsx", "rev2026 Base bi(1).xlsx", "REV2026.xlsx"])
     default_inad = first_existing([
+        "base_crm_cobranca.csv",
         "relatorio_cobranca_gerente.xlsx", "relatorio_cobranca_gerente_2026-07-13.xlsx",
         "inadimplencia.xlsx", "Inadimplencia.xlsx", "base_inadimplencia.xlsx", "inadimplencia.csv"
     ])
@@ -1514,7 +1567,7 @@ with st.sidebar:
         with st.expander("Fontes de dados", expanded=False):
             up_base = st.file_uploader("Substituir BASE BI", type=["xlsx", "xlsm"], key="up_base_final")
             up_rev = st.file_uploader("Substituir REV2026", type=["xlsx", "xlsm"], key="up_rev_final")
-            up_inad = st.file_uploader("Base de inadimplência", type=["xlsx", "xlsm", "csv"], key="up_inad_final")
+            up_inad = st.file_uploader("Relatório do CRM de cobrança", type=["xlsx", "xlsm", "csv"], key="up_inad_final")
 
 base_bytes, base_name = source_bytes(up_base, default_base)
 rev_bytes, rev_name = source_bytes(up_rev, default_rev)
@@ -1575,7 +1628,7 @@ st.markdown(
       <div class='hero-grid'>
         <div>
           <div class='hero-brand'>First Medical · Controladoria</div>
-          <h1>{'Painel Executivo de Caixa' if scope_choice == 'CONSOLIDADO' else 'Resultado de Caixa · ' + scope_text}</h1>
+          <h1>{'Business Performance' if scope_choice == 'CONSOLIDADO' else 'Business Performance · ' + scope_text}</h1>
         </div>
         <div class='hero-chips'>
           <span class='hero-chip'>{period_text}</span>
@@ -2096,22 +2149,26 @@ elif page == "Recebimentos & inadimplência":
     section_header("Inadimplência", "Relatório do CRM de Cobrança")
     inad_page = None if inad_scope is None else inad_scope.copy()
     if inad_page is not None and not inad_page.empty:
-        fi1, fi2, fi3, fi4 = st.columns([1.3, 1.15, 1, .65])
+        fi1, fi2, fi3, fi4, fi5 = st.columns([1.35, 1.05, .9, 1.05, .58])
         inad_client_search = fi1.text_input("Buscar cliente", placeholder="Nome do cliente", key="filter_inad_client")
         faixa_order = ["Até 30 dias", "31 a 60 dias", "61 a 90 dias", "Acima de 90 dias"]
         faixa_options = [x for x in faixa_order if x in inad_page["_FAIXA"].astype(str).unique()]
         selected_faixas = fi2.multiselect("Faixa de atraso", faixa_options, key="filter_inad_faixa")
         max_days = max(int(pd.to_numeric(inad_page["_DIAS_ATRASO"], errors="coerce").fillna(0).max()), 1)
         min_days = fi3.number_input("Atraso mínimo", min_value=0, max_value=max_days, value=0, step=5, key="filter_inad_days")
-        inad_top_n = fi4.selectbox("Exibir", [10, 12, 15, 20], index=1, key="filter_inad_top")
+        seller_options = sorted(v for v in inad_page["_VENDEDOR"].dropna().astype(str).unique() if norm(v) not in {"", "SEM VENDEDOR"})
+        selected_sellers = fi4.multiselect("Vendedor", seller_options, key="filter_inad_seller")
+        inad_top_n = fi5.selectbox("Exibir", [10, 12, 15, 20], index=1, key="filter_inad_top")
         if inad_client_search:
             inad_page = inad_page[inad_page["_CLIENTE"].astype(str).str.contains(inad_client_search, case=False, na=False)]
         if selected_faixas:
             inad_page = inad_page[inad_page["_FAIXA"].astype(str).isin(selected_faixas)]
+        if selected_sellers:
+            inad_page = inad_page[inad_page["_VENDEDOR"].astype(str).isin(selected_sellers)]
         inad_page = inad_page[pd.to_numeric(inad_page["_DIAS_ATRASO"], errors="coerce").fillna(0) >= min_days]
 
     if inad_page is None:
-        st.info("A base de inadimplência ainda não foi carregada. Campos aceitos: Cliente, Valor vencido, Vencimento e Dias de atraso. Também são reconhecidos `Vencidos Corrigidos`, `Vencidos` e `Valor Original`.")
+        st.info("O relatório do CRM de cobrança ainda não foi carregado. O novo CSV reconhece cliente, saldo atual, vencimento, vendedor e gerente; o formato Excel anterior também continua compatível.")
     elif inad_page.empty:
         st.success("Não foram encontrados títulos vencidos para o escopo selecionado.")
     else:
@@ -2154,11 +2211,12 @@ elif page == "Recebimentos & inadimplência":
             st.markdown("**Resumo original exportado pelo CRM de cobrança**")
             clean_table(crm_view, height=260)
 
-        detail = inad_page[["_CLIENTE", "_TITULO", "_VENCIMENTO", "_DIAS_ATRASO", "_FAIXA", "_VALOR_VENCIDO", "_LINHA", "_GERENTE"]].copy()
-        detail.columns = ["Cliente", "Título", "Vencimento", "Dias de atraso", "Faixa", "Valor vencido", "Linha", "Gerente"]
+        detail = inad_page[["_CLIENTE", "_TITULO", "_EMISSAO", "_VENCIMENTO", "_DIAS_ATRASO", "_FAIXA", "_VALOR_VENCIDO", "_VENDEDOR", "_LINHA", "_GERENTE"]].copy()
+        detail.columns = ["Cliente", "Título", "Emissão", "Vencimento", "Dias de atraso", "Faixa", "Valor vencido", "Vendedor", "Linha", "Gerente"]
         detail["Linha"] = detail["Linha"].map(line_label)
         detail_view = detail.sort_values("Valor vencido", ascending=False).copy()
         detail_view["Valor vencido"] = detail_view["Valor vencido"].map(brl)
+        detail_view["Emissão"] = pd.to_datetime(detail_view["Emissão"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
         detail_view["Vencimento"] = pd.to_datetime(detail_view["Vencimento"], errors="coerce").dt.strftime("%d/%m/%Y").fillna("")
         clean_table(detail_view, height=370)
         st.download_button("Exportar inadimplência do escopo", dataframe_download(detail, "Inadimplência"),
