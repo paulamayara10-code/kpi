@@ -1282,10 +1282,6 @@ def company_cash_monthly(
     out["Contribuição de Caixa"] = out["Receitas Operacionais"] - out["Saídas Variáveis"]
     out["Margem de Contribuição Caixa"] = np.where(out["Receitas Operacionais"] != 0, out["Contribuição de Caixa"] / out["Receitas Operacionais"], 0)
     out["Conversão em Caixa"] = np.where(out["Faturamento"] != 0, out["Receitas Operacionais"] / out["Faturamento"], 0)
-    out["Qualidade das Entradas"] = np.where(
-        out["Receitas Operacionais"] + out["Entradas Não Operacionais"] != 0,
-        out["Receitas Operacionais"] / (out["Receitas Operacionais"] + out["Entradas Não Operacionais"]), 0
-    )
     out["Performance de Recebimento"] = np.where(out["Recebimento Previsto"] != 0, out["Recebimento Realizado"] / out["Recebimento Previsto"], 0)
     out["Atingimento da Meta"] = np.where(out["Meta"] != 0, out["Faturamento"] / out["Meta"], 0)
     out["Mês Texto"] = out["Mês"].map(month_label)
@@ -1471,7 +1467,6 @@ def totals_from_monthly(monthly: pd.DataFrame, line_mode: bool = False) -> dict[
         sums["Margem EBITDA Caixa"] = safe_div(sums.get("EBITDA Gerencial de Caixa", 0), sums.get("Receitas Operacionais", 0))
         sums["Margem de Contribuição Caixa"] = safe_div(sums.get("Contribuição de Caixa", 0), sums.get("Receitas Operacionais", 0))
         sums["Conversão em Caixa"] = safe_div(sums.get("Receitas Operacionais", 0), sums.get("Faturamento", 0))
-        sums["Qualidade das Entradas"] = safe_div(sums.get("Receitas Operacionais", 0), sums.get("Receitas Operacionais", 0) + sums.get("Entradas Não Operacionais", 0))
         sums["Performance de Recebimento"] = safe_div(sums.get("Recebimento Realizado", 0), sums.get("Recebimento Previsto", 0))
         sums["Atingimento da Meta"] = safe_div(sums.get("Faturamento", 0), sums.get("Meta", 0))
     return sums
@@ -1662,11 +1657,10 @@ if page == "Dashboard":
         with k3: card("Resultado operacional de caixa", brl(company_totals["Resultado Operacional de Caixa"]), "Receitas recebidas menos saídas pagas", BLUE if company_totals["Resultado Operacional de Caixa"] >= 0 else CYAN)
         with k4: card("Margem operacional de caixa", pct(company_totals["Margem de Caixa"]), "Resultado operacional ÷ receitas recebidas", TEAL)
 
-        k5, k6, k7, k8 = st.columns(4)
+        k5, k6, k7 = st.columns(3)
         with k5: card("EBITDA gerencial de caixa", brl(company_totals["EBITDA Gerencial de Caixa"]), "Resultado antes de IRPJ e CSLL pagos", NAVY)
         with k6: card("Margem de contribuição de caixa", pct(company_totals["Margem de Contribuição Caixa"]), "Receitas recebidas menos saídas variáveis pagas", CYAN)
         with k7: card("Entradas não operacionais", brl(company_totals["Entradas Não Operacionais"]), "Capital de giro e outras fontes não operacionais", CYAN)
-        with k8: card("Qualidade das entradas", pct(company_totals["Qualidade das Entradas"]), "Participação operacional nas entradas classificadas", TEAL)
 
         c1, c2 = st.columns([1.35, 1])
         with c1:
