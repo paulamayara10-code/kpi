@@ -39,28 +39,36 @@ st.markdown(
     <style>
     .stApp {{ background: {LIGHT}; }}
     [data-testid="stSidebar"] {{ background: #FFFFFF; border-right: 1px solid #E6EAF0; }}
-    .block-container {{ padding-top: 1.2rem; padding-bottom: 2.5rem; max-width: 1550px; }}
+    .block-container {{ padding-top: 1.1rem; padding-bottom: 2.5rem; max-width: 1500px; }}
     .hero {{
         background: linear-gradient(115deg, {NAVY} 0%, #113B68 68%, {TEAL} 140%);
-        color: white; padding: 24px 28px; border-radius: 18px; margin-bottom: 16px;
-        box-shadow: 0 8px 24px rgba(11,31,58,.15);
+        color: white; padding: 22px 26px; border-radius: 18px; margin-bottom: 16px;
+        box-shadow: 0 8px 24px rgba(11,31,58,.15); overflow: hidden;
     }}
-    .hero h1 {{ margin: 0; font-size: 1.85rem; letter-spacing: -.02em; }}
-    .hero p {{ margin: 6px 0 0 0; opacity: .86; }}
+    .hero h1 {{ margin: 0; font-size: clamp(1.45rem, 2.5vw, 1.90rem); letter-spacing: -.02em; line-height: 1.15; }}
+    .hero p {{ margin: 7px 0 0 0; opacity: .88; line-height: 1.4; }}
     .kpi-card {{
         background: white; border: 1px solid #E7EBF0; border-radius: 15px;
-        padding: 16px 16px 14px 16px; min-height: 122px;
-        box-shadow: 0 3px 12px rgba(16,24,40,.05);
+        padding: 15px 15px 14px 15px; min-height: 142px; height: 100%;
+        box-shadow: 0 3px 12px rgba(16,24,40,.05); overflow: hidden;
+        display: flex; flex-direction: column; justify-content: space-between;
     }}
-    .kpi-label {{ color: {GRAY}; font-size: .76rem; font-weight: 700; letter-spacing: .045em; text-transform: uppercase; }}
-    .kpi-value {{ color: {NAVY}; font-size: 1.65rem; font-weight: 800; margin-top: 7px; line-height: 1.1; }}
-    .kpi-note {{ color: {GRAY}; font-size: .76rem; margin-top: 8px; }}
+    .kpi-label {{ color: {GRAY}; font-size: .73rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; line-height: 1.25; }}
+    .kpi-value {{ color: {NAVY}; font-size: clamp(1.20rem, 1.7vw, 1.65rem); font-weight: 800; margin-top: 8px; line-height: 1.12; overflow-wrap: anywhere; }}
+    .kpi-note {{ color: {GRAY}; font-size: .73rem; margin-top: 9px; line-height: 1.35; overflow-wrap: anywhere; }}
     .section-title {{ color: {NAVY}; font-size: 1.15rem; font-weight: 800; margin: 8px 0 6px 0; }}
     .insight {{ background: white; border-left: 4px solid {TEAL}; border-radius: 10px; padding: 12px 14px; margin: 7px 0; }}
     .method-note {{ background: #FFF7E8; border: 1px solid #F1D59B; border-radius: 12px; padding: 13px 15px; color: #684900; }}
     div[data-testid="stMetric"] {{ background: white; border: 1px solid #E7EBF0; border-radius: 14px; padding: 12px 14px; }}
     div[data-testid="stDataFrame"] {{ border-radius: 12px; overflow: hidden; }}
     .small-muted {{ color: {GRAY}; font-size: .79rem; }}
+    .kpi-help {{ background: #FFFFFF; border: 1px solid #E7EBF0; border-radius: 12px; padding: 13px 15px; margin-bottom: 10px; line-height: 1.45; }}
+    .kpi-help b {{ color: {NAVY}; }}
+    @media (max-width: 900px) {{
+        .block-container {{ padding-left: .8rem; padding-right: .8rem; }}
+        .hero {{ padding: 18px 18px; }}
+        .kpi-card {{ min-height: 128px; }}
+    }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -145,20 +153,41 @@ def card(label: str, value: str, note: str = "") -> None:
     )
 
 
-def plot_layout(fig: go.Figure, height: int = 390) -> go.Figure:
+def plot_layout(fig: go.Figure, height: int = 390, legend_bottom: bool = True) -> go.Figure:
+    legend = (
+        dict(orientation="h", yanchor="top", y=-0.16, xanchor="left", x=0)
+        if legend_bottom
+        else dict(orientation="v", yanchor="top", y=1, xanchor="left", x=1.02)
+    )
     fig.update_layout(
         height=height,
-        margin=dict(l=15, r=15, t=55, b=15),
+        margin=dict(l=18, r=18, t=70, b=70 if legend_bottom else 30),
         paper_bgcolor="white",
         plot_bgcolor="white",
-        font=dict(family="Arial", color="#344054"),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        title_font=dict(color=NAVY, size=16),
+        font=dict(family="Arial", color="#344054", size=12),
+        legend=legend,
+        title=dict(font=dict(color=NAVY, size=16), x=0.01, xanchor="left", y=0.98),
         hoverlabel=dict(bgcolor="white"),
+        hovermode="closest",
+        separators=",.",
     )
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(gridcolor="#EDF0F4", zeroline=False)
+    fig.update_xaxes(showgrid=False, automargin=True)
+    fig.update_yaxes(gridcolor="#EDF0F4", zeroline=False, automargin=True)
     return fig
+
+
+def apply_brl_axis(fig: go.Figure, axis: str = "y") -> go.Figure:
+    axis_update = dict(tickprefix="R$ ", tickformat="~s", separatethousands=True)
+    if axis == "x":
+        fig.update_xaxes(**axis_update)
+    else:
+        fig.update_yaxes(**axis_update)
+    return fig
+
+
+def short_label(value: object, limit: int = 34) -> str:
+    text = str(value or "Não informado").strip()
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 def dataframe_download(df: pd.DataFrame, name: str) -> bytes:
@@ -440,6 +469,7 @@ def calculate_monthly(
     e["Classificação"] = e["PAI"].map(classifications).fillna("Fixo/Operacional")
 
     op_rev = l[l["_GRUPO_N"] == "RECEITAS OPERACIONAIS"].groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_MES": "Mês", "_VALOR": "Receita Operacional"})
+    non_op_rev = l[l["_GRUPO_N"] == "RECEITAS NAO OPERACIONAIS"].groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_MES": "Mês", "_VALOR": "Receita Não Operacional"})
     op_exp = e[e["_GRUPO_N"] == "SAIDAS OPERACIONAIS"].groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_MES": "Mês", "_VALOR": "Despesas Operacionais"})
     var = e[(e["_GRUPO_N"] == "SAIDAS OPERACIONAIS") & (e["Classificação"] == "Variável")].groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_MES": "Mês", "_VALOR": "Custos Variáveis"})
     fix = e[(e["_GRUPO_N"] == "SAIDAS OPERACIONAIS") & (e["Classificação"] == "Fixo/Operacional")].groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_MES": "Mês", "_VALOR": "Custos Fixos"})
@@ -447,7 +477,7 @@ def calculate_monthly(
 
     p = period_filter(performance, start, end).groupby("_MES", as_index=False)[["_PREVISTO", "_REALIZADO"]].sum().rename(columns={"_MES": "Mês", "_PREVISTO": "Recebimento Previsto", "_REALIZADO": "Recebimento Realizado"})
 
-    for df in [f, m, r, op_rev, op_exp, var, fix, add, p]:
+    for df in [f, m, r, op_rev, non_op_rev, op_exp, var, fix, add, p]:
         out = out.merge(df, on="Mês", how="left")
     out = out.fillna(0)
     out["Atingimento"] = np.where(out["Meta"] != 0, out["Faturamento"] / out["Meta"], 0)
@@ -456,6 +486,9 @@ def calculate_monthly(
     out["EBITDA Gerencial"] = out["Receita Operacional"] - out["Despesas Operacionais"] + out["IRPJ/CSLL add-back"]
     out["Margem EBITDA"] = np.where(out["Receita Operacional"] != 0, out["EBITDA Gerencial"] / out["Receita Operacional"], 0)
     out["Performance Recebimento"] = np.where(out["Recebimento Previsto"] != 0, out["Recebimento Realizado"] / out["Recebimento Previsto"], 0)
+    out["Entradas Classificadas"] = out["Receita Operacional"] + out["Receita Não Operacional"]
+    out["Qualidade das Entradas"] = np.where(out["Entradas Classificadas"] != 0, out["Receita Operacional"] / out["Entradas Classificadas"], 0)
+    out["Conversão do Faturamento"] = np.where(out["Faturamento"] != 0, out["Receita Operacional"] / out["Faturamento"], 0)
     out["Mês Texto"] = out["Mês"].map(month_label)
     return out
 
@@ -470,7 +503,10 @@ def executive_totals(monthly: pd.DataFrame, caixa: pd.DataFrame, start: pd.Perio
     sums["MC %"] = safe_div(sums.get("Margem de Contribuição", 0), sums.get("Faturamento", 0))
     sums["Margem EBITDA"] = safe_div(sums.get("EBITDA Gerencial", 0), sums.get("Receita Operacional", 0))
     sums["Performance Recebimento"] = safe_div(sums.get("Recebimento Realizado", 0), sums.get("Recebimento Previsto", 0))
-    sums["Conversão de Caixa"] = safe_div(sums.get("Receita Operacional", 0), sums.get("Faturamento", 0))
+    sums["Entradas Classificadas"] = sums.get("Receita Operacional", 0) + sums.get("Receita Não Operacional", 0)
+    sums["Qualidade das Entradas"] = safe_div(sums.get("Receita Operacional", 0), sums.get("Entradas Classificadas", 0))
+    sums["Conversão do Faturamento"] = safe_div(sums.get("Receita Operacional", 0), sums.get("Faturamento", 0))
+    sums["Dependência Não Operacional"] = safe_div(sums.get("Receita Não Operacional", 0), sums.get("Entradas Classificadas", 0))
     sums["Ponto de Equilíbrio"] = safe_div(sums.get("Custos Fixos", 0), sums.get("MC %", 0))
     return sums
 
@@ -551,20 +587,51 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# KPIs principais
-k1, k2, k3, k4, k5 = st.columns(5)
-with k1: card("Faturamento bruto", brl(totals["Faturamento"], True), f"Meta: {brl(totals['Meta'], True)}")
-with k2: card("Atingimento da meta", pct(totals["Atingimento"]), "Meta comercial da BASE BI")
-with k3: card("Margem de contribuição", pct(totals["MC %"]), brl(totals["Margem de Contribuição"], True))
-with k4: card("EBITDA gerencial caixa", brl(totals["EBITDA Gerencial"], True), "Com IRPJ/CSLL adicionados de volta")
-with k5: card("Margem EBITDA", pct(totals["Margem EBITDA"]), "Sobre receita operacional recebida")
+# KPIs principais — quatro cartões por linha para preservar leitura e evitar sobreposição.
+k1, k2, k3, k4 = st.columns(4)
+with k1: card("Faturamento bruto", brl(totals["Faturamento"], True), f"Vendas emitidas · Meta: {brl(totals['Meta'], True)}")
+with k2: card("Atingimento da meta", pct(totals["Atingimento"]), "Faturamento bruto ÷ meta comercial")
+with k3: card("Margem de contribuição", pct(totals["MC %"]), f"Valor: {brl(totals['Margem de Contribuição'], True)}")
+with k4: card("EBITDA gerencial de caixa", brl(totals["EBITDA Gerencial"], True), "Operação antes de IRPJ e CSLL; visão gerencial")
 
-k6, k7, k8, k9, k10 = st.columns(5)
-with k6: card("Recebimentos totais", brl(totals["Recebimentos Totais"], True), "Inclui entradas operacionais e não operacionais")
-with k7: card("Performance recebimento", pct(totals["Performance Recebimento"]), "Realizado ÷ previsto")
-with k8: card("Despesas operacionais", brl(totals["Despesas Operacionais"], True), pct(safe_div(totals["Despesas Operacionais"], totals["Receita Operacional"])))
-with k9: card("Geração de caixa", brl(totals["Geração Operacional"], True), "Receitas realizadas menos despesas realizadas")
-with k10: card("Ponto de equilíbrio", brl(totals["Ponto de Equilíbrio"], True), "Custos fixos ÷ margem de contribuição %")
+k5, k6, k7, k8 = st.columns(4)
+with k5: card("Margem EBITDA", pct(totals["Margem EBITDA"]), "EBITDA gerencial ÷ receita operacional recebida")
+with k6: card("Receita operacional recebida", brl(totals["Receita Operacional"], True), "Entradas ligadas à atividade principal")
+with k7: card("Entradas não operacionais", brl(totals["Receita Não Operacional"], True), "Pode incluir capital de giro, empréstimos e outras fontes")
+with k8: card("Qualidade das entradas", pct(totals["Qualidade das Entradas"]), "Receita operacional ÷ entradas classificadas")
+
+k9, k10, k11, k12 = st.columns(4)
+with k9: card("Recebimentos totais", brl(totals["Recebimentos Totais"], True), "Total pago na base de recebimentos")
+with k10: card("Performance de recebimento", pct(totals["Performance Recebimento"]), "Recebimento realizado ÷ previsto")
+with k11: card("Despesas operacionais", brl(totals["Despesas Operacionais"], True), f"{pct(safe_div(totals['Despesas Operacionais'], totals['Receita Operacional']))} da receita operacional")
+with k12: card("Ponto de equilíbrio", brl(totals["Ponto de Equilíbrio"], True), "Custos fixos ÷ margem de contribuição %")
+
+with st.expander("ℹ️ Como interpretar cada KPI", expanded=False):
+    h1, h2 = st.columns(2)
+    with h1:
+        st.markdown(
+            """
+            <div class='kpi-help'><b>Faturamento bruto</b><br>Valor das vendas emitidas no período. Não significa, necessariamente, que todo o valor já foi recebido.</div>
+            <div class='kpi-help'><b>Atingimento da meta</b><br>Compara o faturamento bruto com a meta comercial acumulada do mesmo período.</div>
+            <div class='kpi-help'><b>Margem de contribuição</b><br>Faturamento menos custos variáveis. Mostra quanto sobra para pagar a estrutura fixa e formar resultado.</div>
+            <div class='kpi-help'><b>EBITDA gerencial de caixa</b><br>Receita operacional recebida menos despesas operacionais, antes de IRPJ e CSLL. É uma visão gerencial, não o EBITDA contábil oficial.</div>
+            <div class='kpi-help'><b>Margem EBITDA</b><br>Percentual da receita operacional recebida que permaneceu como EBITDA gerencial.</div>
+            <div class='kpi-help'><b>Qualidade das entradas</b><br>Percentual das entradas classificadas que veio da operação. Quanto menor, maior a participação de fontes não operacionais.</div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with h2:
+        st.markdown(
+            """
+            <div class='kpi-help'><b>Receita operacional recebida</b><br>Entradas de caixa relacionadas à atividade principal da empresa.</div>
+            <div class='kpi-help'><b>Entradas não operacionais</b><br>Valores que aumentam o caixa, mas não representam receita da operação, como capital de giro, empréstimos e outros recebimentos.</div>
+            <div class='kpi-help'><b>Recebimentos totais</b><br>Total de títulos pagos na base de recebimentos, sem assumir que todas as entradas representam receita operacional do período.</div>
+            <div class='kpi-help'><b>Performance de recebimento</b><br>Compara o que efetivamente entrou com o valor previsto para recebimento.</div>
+            <div class='kpi-help'><b>Despesas operacionais</b><br>Saídas associadas à manutenção e execução das atividades da empresa no período.</div>
+            <div class='kpi-help'><b>Ponto de equilíbrio</b><br>Faturamento necessário para cobrir os custos fixos, considerando a margem de contribuição estimada.</div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
@@ -582,18 +649,20 @@ with tab_exec:
         fig.add_bar(x=monthly["Mês Texto"], y=monthly["Faturamento"], name="Faturamento", marker_color=BLUE)
         fig.add_scatter(x=monthly["Mês Texto"], y=monthly["Meta"], name="Meta", mode="lines+markers", line=dict(color=ORANGE, width=3))
         fig.update_layout(title="Faturamento x Meta")
+        apply_brl_axis(fig, "y")
         st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
     with c2:
         waterfall = go.Figure(go.Waterfall(
             name="Resultado", orientation="v", measure=["absolute", "relative", "relative", "relative", "total"],
-            x=["Receita operacional", "Custos variáveis", "Custos fixos", "IRPJ/CSLL add-back", "EBITDA"],
+            x=["Receita<br>operacional", "Custos<br>variáveis", "Custos<br>fixos", "IRPJ/CSLL<br>add-back", "EBITDA"],
             y=[totals["Receita Operacional"], -totals["Custos Variáveis"], -totals["Custos Fixos"], totals["IRPJ/CSLL add-back"], totals["EBITDA Gerencial"]],
             connector={"line": {"color": "#98A2B3"}},
             increasing={"marker": {"color": GREEN}}, decreasing={"marker": {"color": RED}}, totals={"marker": {"color": NAVY}},
-            texttemplate="R$ %{y:,.0f}", textposition="outside",
+            texttemplate="", textposition="none",
         ))
         waterfall.update_layout(title="Ponte do EBITDA Gerencial")
-        st.plotly_chart(plot_layout(waterfall), width="stretch", config={"displayModeBar": False})
+        apply_brl_axis(waterfall, "y")
+        st.plotly_chart(plot_layout(waterfall, 420, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
     c3, c4 = st.columns(2)
     with c3:
@@ -607,19 +676,22 @@ with tab_exec:
         exec_costs = period_filter(expenses, start_month, end_month)
         exec_costs = exec_costs[exec_costs["_GRUPO_N"] == "SAIDAS OPERACIONAIS"]
         top_cost = exec_costs.groupby("PAI", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(8)
-        fig = px.bar(top_cost.sort_values("_VALOR"), x="_VALOR", y="PAI", orientation="h", title="Principais Despesas Operacionais")
-        fig.update_traces(marker_color=BLUE, hovertemplate="%{y}<br>R$ %{x:,.2f}<extra></extra>")
-        st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
+        top_cost["Natureza"] = top_cost["PAI"].map(lambda x: short_label(x, 34))
+        fig = px.bar(top_cost.sort_values("_VALOR"), x="_VALOR", y="Natureza", orientation="h", title="Principais Despesas Operacionais", custom_data=["PAI"])
+        fig.update_traces(marker_color=BLUE, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
     st.markdown("<div class='section-title'>Leitura executiva automática</div>", unsafe_allow_html=True)
     fat_month = monthly.loc[monthly["Faturamento"].idxmax()]
     weak_ebitda = monthly[monthly["EBITDA Gerencial"] < 0]
-    top_pai = top_cost.iloc[-1] if not top_cost.empty else None
+    top_pai = top_cost.iloc[0] if not top_cost.empty else None
     top_manager = period_filter(fat, start_month, end_month).groupby("GERENTE", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False)
     top_manager_row = top_manager.iloc[0] if not top_manager.empty else None
     insights = [
         f"O faturamento acumulado atingiu <b>{pct(totals['Atingimento'])}</b> da meta no período.",
         f"O melhor mês de faturamento foi <b>{fat_month['Mês Texto']}</b>, com <b>{brl(fat_month['Faturamento'])}</b>.",
+        f"A qualidade das entradas foi de <b>{pct(totals['Qualidade das Entradas'])}</b>; as entradas não operacionais somaram <b>{brl(totals['Receita Não Operacional'])}</b> e não foram tratadas como receita do negócio.",
     ]
     if top_manager_row is not None:
         insights.append(f"O gerente com maior faturamento foi <b>{top_manager_row['GERENTE']}</b>, com <b>{brl(top_manager_row['_VALOR'])}</b>.")
@@ -639,16 +711,17 @@ with tab_exec:
 with tab_result:
     st.markdown("<div class='section-title'>Demonstração gerencial mensal</div>", unsafe_allow_html=True)
     display_cols = [
-        "Mês Texto", "Faturamento", "Meta", "Atingimento", "Receita Operacional", "Despesas Operacionais",
-        "Custos Variáveis", "Custos Fixos", "Margem de Contribuição", "MC %", "EBITDA Gerencial", "Margem EBITDA",
-        "Recebimento Previsto", "Recebimento Realizado", "Performance Recebimento",
+        "Mês Texto", "Faturamento", "Meta", "Atingimento", "Receita Operacional", "Receita Não Operacional",
+        "Qualidade das Entradas", "Conversão do Faturamento", "Despesas Operacionais", "Custos Variáveis", "Custos Fixos",
+        "Margem de Contribuição", "MC %", "EBITDA Gerencial", "Margem EBITDA", "Recebimento Previsto",
+        "Recebimento Realizado", "Performance Recebimento",
     ]
     result_display = monthly[display_cols].rename(columns={"Mês Texto": "Mês"}).copy()
     money_cols_result = [
-        "Faturamento", "Meta", "Receita Operacional", "Despesas Operacionais", "Custos Variáveis",
+        "Faturamento", "Meta", "Receita Operacional", "Receita Não Operacional", "Despesas Operacionais", "Custos Variáveis",
         "Custos Fixos", "Margem de Contribuição", "EBITDA Gerencial", "Recebimento Previsto", "Recebimento Realizado"
     ]
-    pct_cols_result = ["Atingimento", "MC %", "Margem EBITDA", "Performance Recebimento"]
+    pct_cols_result = ["Atingimento", "Qualidade das Entradas", "Conversão do Faturamento", "MC %", "Margem EBITDA", "Performance Recebimento"]
     result_config = {c: st.column_config.NumberColumn(format="R$ %.2f") for c in money_cols_result}
     result_config.update({c: st.column_config.NumberColumn(format="%.1f%%") for c in pct_cols_result})
     result_for_view = result_display.copy()
@@ -668,7 +741,7 @@ with tab_result:
     )
     st.markdown(
         "<div class='method-note'><b>Importante:</b> margem de contribuição e EBITDA usam bases com regimes diferentes. "
-        "O faturamento está por competência comercial; custos e recebimentos refletem caixa. O indicador é gerencial e deve ser conciliado ao balancete para uso contábil oficial.</div>",
+        "O faturamento está por competência comercial; custos e recebimentos refletem caixa. Entradas não operacionais, como capital de giro, aumentam o caixa, mas não entram como receita operacional nem melhoram a qualidade das entradas. O indicador é gerencial e deve ser conciliado ao balancete para uso contábil oficial.</div>",
         unsafe_allow_html=True,
     )
 
@@ -704,10 +777,11 @@ with tab_com:
     ticket = safe_div(filtered_revenue, invoices)
     share = safe_div(filtered_revenue, totals["Faturamento"])
 
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3 = st.columns(3)
     with m1: card("Faturamento filtrado", brl(filtered_revenue, True), f"{pct(share)} do total")
     with m2: card("Meta filtrada", brl(meta_filtered, True), "Conforme vendedor ou gerente selecionado")
     with m3: card("Atingimento", pct(safe_div(filtered_revenue, meta_filtered)), "Faturamento ÷ meta")
+    m4, m5 = st.columns(2)
     with m4: card("Clientes ativos", f"{clients:,}".replace(",", "."), f"{invoices:,} notas".replace(",", "."))
     with m5: card("Ticket médio por NF", brl(ticket, True), "Faturamento ÷ notas fiscais")
 
@@ -716,26 +790,32 @@ with tab_com:
         by_month = com.groupby("_MES", as_index=False)["_VALOR"].sum()
         by_month["Mês"] = by_month["_MES"].map(month_label)
         fig = px.bar(by_month, x="Mês", y="_VALOR", title="Faturamento Mensal Filtrado")
-        fig.update_traces(marker_color=BLUE, hovertemplate="%{x}<br>R$ %{y:,.2f}<extra></extra>")
+        fig.update_traces(marker_color=BLUE, hovertemplate="%{x}<br>Valor: R$ %{y:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "y")
         st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
     with c2:
         by_manager = com.groupby("GERENTE", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False)
-        fig = px.bar(by_manager, x="GERENTE", y="_VALOR", title="Faturamento por Gerente")
-        fig.update_traces(marker_color=TEAL, hovertemplate="%{x}<br>R$ %{y:,.2f}<extra></extra>")
-        st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
+        by_manager["Gerente"] = by_manager["GERENTE"].map(lambda x: short_label(x, 30))
+        fig = px.bar(by_manager.sort_values("_VALOR"), x="_VALOR", y="Gerente", orientation="h", title="Faturamento por Gerente", custom_data=["GERENTE"])
+        fig.update_traces(marker_color=TEAL, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
     c3, c4 = st.columns(2)
     with c3:
         by_segment = com.groupby("SEGMENTO", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(12)
         fig = px.bar(by_segment.sort_values("_VALOR"), x="_VALOR", y="SEGMENTO", orientation="h", title="Principais Segmentos")
-        fig.update_traces(marker_color=BLUE)
-        st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+        fig.update_traces(marker_color=BLUE, hovertemplate="%{y}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, 430, legend_bottom=False), width="stretch", config={"displayModeBar": False})
     with c4:
         type_col = "NOVA" if "NOVA" in com.columns else "CATEGORIA"
-        by_type = com.groupby(type_col, as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False)
-        fig = px.pie(by_type, names=type_col, values="_VALOR", hole=.58, title="Mix de Receita")
-        fig.update_traces(textposition="inside", textinfo="percent+label")
-        st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+        by_type = com.groupby(type_col, as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(10)
+        by_type["Tipo"] = by_type[type_col].map(lambda x: short_label(x, 32))
+        fig = px.bar(by_type.sort_values("_VALOR"), x="_VALOR", y="Tipo", orientation="h", title="Mix de Receita", custom_data=[type_col])
+        fig.update_traces(marker_color=TEAL, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, 430, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
     c5, c6 = st.columns(2)
     with c5:
@@ -769,6 +849,7 @@ with tab_cash:
         fig.add_bar(x=monthly["Mês Texto"], y=monthly["Recebimento Previsto"], name="Previsto", marker_color="#A7C4DF")
         fig.add_scatter(x=monthly["Mês Texto"], y=monthly["Recebimento Realizado"], name="Realizado", mode="lines+markers", line=dict(color=TEAL, width=3))
         fig.update_layout(title="Recebimento Previsto x Realizado")
+        apply_brl_axis(fig, "y")
         st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
     with c2:
         fig = go.Figure()
@@ -776,13 +857,21 @@ with tab_cash:
         fig.add_bar(x=monthly["Mês Texto"], y=monthly["Despesas Operacionais"], name="Despesas operacionais", marker_color=RED)
         fig.add_scatter(x=monthly["Mês Texto"], y=monthly["EBITDA Gerencial"], name="EBITDA", mode="lines+markers", line=dict(color=GREEN, width=3))
         fig.update_layout(title="Receita, Despesa e EBITDA Gerencial", barmode="group")
+        apply_brl_axis(fig, "y")
         st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
 
     c3, c4, c5, c6 = st.columns(4)
-    with c3: card("Receita operacional", brl(totals["Receita Operacional"], True), "Entradas classificadas como operacionais")
-    with c4: card("Conversão de caixa", pct(totals["Conversão de Caixa"]), "Receita operacional recebida ÷ faturamento")
-    with c5: card("Receitas realizadas", brl(totals["Caixa Receitas"], True), "Caixa Operacional")
-    with c6: card("Despesas realizadas", brl(totals["Caixa Despesas"], True), "Caixa Operacional")
+    with c3: card("Receita operacional", brl(totals["Receita Operacional"], True), "Entradas vinculadas à atividade principal")
+    with c4: card("Conversão do faturamento", pct(totals["Conversão do Faturamento"]), "Receita operacional recebida ÷ faturamento emitido")
+    with c5: card("Qualidade das entradas", pct(totals["Qualidade das Entradas"]), "Parcela operacional das entradas classificadas")
+    with c6: card("Entradas não operacionais", brl(totals["Receita Não Operacional"], True), f"{pct(totals['Dependência Não Operacional'])} das entradas classificadas")
+
+    st.markdown(
+        "<div class='method-note'><b>Leitura correta:</b> capital de giro e empréstimos aumentam o saldo de caixa, "
+        "mas não são receita gerada pela operação. Por isso, o app separa essas entradas e calcula a qualidade das entradas "
+        "somente pela participação da receita operacional.</div>",
+        unsafe_allow_html=True,
+    )
 
     rev_period = period_filter(costs, start_month, end_month)
     comp = rev_period.groupby("_GRUPO_N", as_index=False)["_VALOR"].sum()
@@ -794,7 +883,21 @@ with tab_cash:
     comp = comp[comp["_GRUPO_N"].isin(label_map)]
     fig = px.bar(comp, x="Grupo", y="_VALOR", color="Grupo", title="Composição das Entradas e Saídas")
     fig.update_layout(showlegend=False)
-    st.plotly_chart(plot_layout(fig), width="stretch", config={"displayModeBar": False})
+    apply_brl_axis(fig, "y")
+    st.plotly_chart(plot_layout(fig, legend_bottom=False), width="stretch", config={"displayModeBar": False})
+
+    non_op = rev_period[rev_period["_GRUPO_N"] == "RECEITAS NAO OPERACIONAIS"].copy()
+    if not non_op.empty:
+        non_op_summary = non_op.groupby("PAI", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False)
+        non_op_summary["Natureza"] = non_op_summary["PAI"].map(lambda x: short_label(x, 38))
+        fig = px.bar(
+            non_op_summary.sort_values("_VALOR"), x="_VALOR", y="Natureza", orientation="h",
+            title="Detalhamento das Entradas Não Operacionais",
+            custom_data=["PAI"],
+        )
+        fig.update_traces(marker_color=ORANGE, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, 350, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
 # =========================================================
 # CUSTOS & PREMISSAS
@@ -813,12 +916,16 @@ with tab_cost:
     with c1:
         pareto = cost_period.groupby("PAI", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(15)
         fig = px.bar(pareto.sort_values("_VALOR"), x="_VALOR", y="PAI", orientation="h", title="Pareto de Despesas")
-        fig.update_traces(marker_color=BLUE)
-        st.plotly_chart(plot_layout(fig, 500), width="stretch", config={"displayModeBar": False})
+        fig.update_traces(marker_color=BLUE, hovertemplate="%{y}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, 500, legend_bottom=False), width="stretch", config={"displayModeBar": False})
     with c2:
-        by_cc = cost_period.groupby("CENTRO DE CUSTOS RATEAO", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False)
-        fig = px.pie(by_cc, names="CENTRO DE CUSTOS RATEAO", values="_VALOR", hole=.5, title="Despesas por Rateio")
-        st.plotly_chart(plot_layout(fig, 500), width="stretch", config={"displayModeBar": False})
+        by_cc = cost_period.groupby("CENTRO DE CUSTOS RATEAO", as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(12)
+        by_cc["Rateio"] = by_cc["CENTRO DE CUSTOS RATEAO"].map(lambda x: short_label(x, 34))
+        fig = px.bar(by_cc.sort_values("_VALOR"), x="_VALOR", y="Rateio", orientation="h", title="Despesas por Rateio", custom_data=["CENTRO DE CUSTOS RATEAO"])
+        fig.update_traces(marker_color=TEAL, hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
+        apply_brl_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, 500, legend_bottom=False), width="stretch", config={"displayModeBar": False})
 
     st.divider()
     st.markdown("#### Premissas da margem de contribuição e EBITDA")
@@ -894,6 +1001,9 @@ with tab_quality:
         ["Margem de Contribuição", "Faturamento menos saídas operacionais da aba Resumo Despesas classificadas como variáveis.", "Estimativa gerencial mista"],
         ["EBITDA Gerencial Caixa", "Receitas operacionais do Centro de Custos menos saídas operacionais do Resumo Despesas, adicionando IRPJ e CSLL de volta.", "Caixa"],
         ["Performance de Recebimento", "Recebimento realizado dividido pelo previsto.", "Caixa"],
+        ["Qualidade das Entradas", "Receita operacional recebida dividida pelas entradas operacionais e não operacionais classificadas.", "Caixa"],
+        ["Conversão do Faturamento", "Receita operacional recebida dividida pelo faturamento bruto emitido.", "Regimes diferentes; observar defasagem"],
+        ["Entradas Não Operacionais", "Entradas que aumentam o caixa, mas não representam receita da operação, como capital de giro e empréstimos.", "Caixa / financiamento"],
         ["Ponto de Equilíbrio", "Custos fixos divididos pela margem de contribuição percentual.", "Estimativa gerencial"],
     ], columns=["Indicador", "Cálculo", "Regime"])
     st.dataframe(methodology, width="stretch", hide_index=True)
