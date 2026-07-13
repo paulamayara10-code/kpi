@@ -515,8 +515,10 @@ def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     for df, label in [(metas, "Metas"), (metas_g, "Metas Gerentes")]:
         mcol = require_col(df, ["MÊS"], label)
         vcol = require_col(df, ["META MENSAL"], label)
+        annual_col = optional_col(df, ["METAL ANUAL", "META ANUAL"])
         df["_MES"] = pd.to_datetime(df[mcol], errors="coerce").dt.to_period("M")
         df["_META"] = to_number(df[vcol])
+        df["_META_ANUAL"] = to_number(df[annual_col]) if annual_col else 0.0
         for c in ["GERENTE", "VENDEDOR"]:
             if c in df.columns:
                 df[c] = df[c].fillna("Não informado").astype(str).str.strip()
@@ -924,6 +926,106 @@ def company_cash_monthly(
     return out
 
 
+def commercial_performance_monthly(
+    fat: pd.DataFrame, metas_g: pd.DataFrame, start: pd.Period, end: pd.Period,
+    line: str = "CONSOLIDADO",
+) -> pd.DataFrame:
+    """Faturamento e metas pelo gerente responsável por cada linha."""
+    months = pd.period_range(start, end, freq="M")
+    out = pd.DataFrame({"Mês": months})
+
+    fbase = fat.copy()
+    mbase = metas_g.copy()
+    if line != "CONSOLIDADO":
+        fbase = fbase[fbase["_LINHA"] == line]
+        manager = LINE_MANAGER_MAP.get(line, "")
+        if "GERENTE" in mbase.columns:
+            mbase = mbase[mbase["GERENTE"].map(norm) == manager]
+
+    actual = (
+        period_filter(fbase, start, end).groupby("_MES", as_index=False)["_VALOR"].sum()
+        .rename(columns={"_MES": "Mês", "_VALOR": "Faturamento"})
+    )
+    target = (
+        period_filter(mbase, start, end).groupby("_MES", as_index=False)["_META"].sum()
+        .rename(columns={"_MES": "Mês", "_META": "Meta"})
+    )
+    out = out.merge(actual, on="Mês", how="left").merge(target, on="Mês", how="left").fillna(0)
+    out["Desvio"] = out["Faturamento"] - out["Meta"]
+    out["Atingimento"] = np.where(out["Meta"] != 0, out["Faturamento"] / out["Meta"], 0)
+    out["Mês Texto"] = out["Mês"].map(month_label)
+    return out
+
+
+def commercial_performance_totals(
+    monthly: pd.DataFrame, metas_g: pd.DataFrame, line: str, reference_year: int,
+) -> dict[str, float]:
+    actual = float(monthly["Faturamento"].sum())
+    target = float(monthly["Meta"].sum())
+    month_count = max(int(monthly["Mês"].nunique()), 1)
+
+    annual = metas_g[metas_g["_MES"].dt.year == reference_year].copy()
+    if line != "CONSOLIDADO" and "GERENTE" in annual.columns:
+        annual = annual[annual["GERENTE"].map(norm) == LINE_MANAGER_MAP.get(line, "")]
+    if "_META_ANUAL" in annual.columns and float(annual["_META_ANUAL"].sum()) > 0:
+        if "GERENTE" in annual.columns:
+            annual_target = float(annual.assign(_GERENTE_KEY=annual["GERENTE"].map(norm)).groupby("_GERENTE_KEY")["_META_ANUAL"].max().sum())
+        else:
+            annual_target = float(annual["_META_ANUAL"].max())
+    else:
+        annual_target = float(annual["_META"].sum())
+    monthly_average = actual / month_count
+    annual_projection = monthly_average * 12
+    return {
+        "Faturamento": actual,
+        "Meta": target,
+        "Desvio": actual - target,
+        "Atingimento": safe_div(actual, target),
+        "Média Mensal": monthly_average,
+        "Meta Anual": annual_target,
+        "Projeção Anual": annual_projection,
+        "Atingimento Projetado": safe_div(annual_projection, annual_target),
+    }
+
+
+def seller_performance(
+    fat: pd.DataFrame, metas: pd.DataFrame, start: pd.Period, end: pd.Period,
+    line: str = "CONSOLIDADO",
+) -> pd.DataFrame:
+    fbase = period_filter(fat, start, end).copy()
+    mbase = period_filter(metas, start, end).copy()
+    if line != "CONSOLIDADO":
+        fbase = fbase[fbase["_LINHA"] == line]
+        manager = LINE_MANAGER_MAP.get(line, "")
+        if "GERENTE" in mbase.columns:
+            mbase = mbase[mbase["GERENTE"].map(norm) == manager]
+
+    seller_col = "VENDEDOR / REPRESENTANTE" if "VENDEDOR / REPRESENTANTE" in fbase.columns else "VENDEDOR"
+    fbase["_SELLER_KEY"] = fbase[seller_col].map(norm)
+    mbase["_SELLER_KEY"] = mbase["VENDEDOR"].map(norm) if "VENDEDOR" in mbase.columns else "NAO INFORMADO"
+
+    actual = fbase.groupby("_SELLER_KEY", as_index=False)["_VALOR"].sum().rename(columns={"_VALOR": "Faturamento"})
+    actual_names = fbase.groupby("_SELLER_KEY", as_index=False)[seller_col].first().rename(columns={seller_col: "Vendedor"})
+    goals = mbase.groupby("_SELLER_KEY", as_index=False)["_META"].sum().rename(columns={"_META": "Meta"})
+    goal_names = mbase.groupby("_SELLER_KEY", as_index=False)["VENDEDOR"].first().rename(columns={"VENDEDOR": "Vendedor Meta"}) if "VENDEDOR" in mbase.columns else pd.DataFrame(columns=["_SELLER_KEY", "Vendedor Meta"])
+
+    out = actual.merge(goals, on="_SELLER_KEY", how="outer").merge(actual_names, on="_SELLER_KEY", how="left")
+    if not goal_names.empty:
+        out = out.merge(goal_names, on="_SELLER_KEY", how="left")
+        out["Vendedor"] = out["Vendedor"].where(out["Vendedor"].notna(), out["Vendedor Meta"])
+        out = out.drop(columns=["Vendedor Meta"])
+    out[["Faturamento", "Meta"]] = out[["Faturamento", "Meta"]].fillna(0)
+    out["Vendedor"] = out["Vendedor"].fillna(out["_SELLER_KEY"].str.title())
+    out["Desvio"] = out["Faturamento"] - out["Meta"]
+    out["Atingimento"] = np.where(out["Meta"] != 0, out["Faturamento"] / out["Meta"], 0)
+    out["Status"] = np.select(
+        [out["Atingimento"] >= 1, out["Atingimento"] >= .9],
+        ["Meta atingida", "Próximo da meta"],
+        default="Abaixo da meta",
+    )
+    return out.sort_values("Faturamento", ascending=False).reset_index(drop=True)
+
+
 def line_cash_monthly(
     line: str, fat: pd.DataFrame, receitas: pd.DataFrame, custos: pd.DataFrame,
     start: pd.Period, end: pd.Period,
@@ -1005,11 +1107,13 @@ def totals_from_monthly(monthly: pd.DataFrame, line_mode: bool = False) -> dict[
     return sums
 
 
-def line_summary(fat: pd.DataFrame, receitas: pd.DataFrame, custos: pd.DataFrame, start: pd.Period, end: pd.Period, inad: pd.DataFrame | None) -> pd.DataFrame:
+def line_summary(fat: pd.DataFrame, metas_g: pd.DataFrame, receitas: pd.DataFrame, custos: pd.DataFrame, start: pd.Period, end: pd.Period, inad: pd.DataFrame | None) -> pd.DataFrame:
     rows = []
     for line in LINES:
         monthly = line_cash_monthly(line, fat, receitas, custos, start, end)
         t = totals_from_monthly(monthly, True)
+        perf_monthly = commercial_performance_monthly(fat, metas_g, start, end, line)
+        perf = commercial_performance_totals(perf_monthly, metas_g, line, end.year)
         direct = period_filter(custos[custos["_LINHA_DIRETA"] == line], start, end)
         revenue_rows = direct[
             (direct["_EMPRESA_N"] == "RECEITA") &
@@ -1029,7 +1133,12 @@ def line_summary(fat: pd.DataFrame, receitas: pd.DataFrame, custos: pd.DataFrame
             "Resultado Direto de Caixa": t.get("Resultado Direto de Caixa", 0),
             "Margem Direta de Caixa": t.get("Margem Direta de Caixa", 0),
             "Margem de Contribuição Direta": t.get("Margem de Contribuição Direta", 0),
-            "Faturamento": t.get("Faturamento", 0),
+            "Faturamento": perf.get("Faturamento", t.get("Faturamento", 0)),
+            "Meta": perf.get("Meta", 0),
+            "Atingimento da Meta": perf.get("Atingimento", 0),
+            "Desvio da Meta": perf.get("Desvio", 0),
+            "Projeção Anual": perf.get("Projeção Anual", 0),
+            "Atingimento Projetado": perf.get("Atingimento Projetado", 0),
             "Conversão em Caixa": t.get("Conversão em Caixa", 0),
             "Lançamentos de Receita": int(len(revenue_rows)),
             "Lançamentos de Custo": int(len(cost_rows)),
@@ -1135,7 +1244,7 @@ with st.sidebar:
         st.markdown(f"<div class='secure-note'><b>Visão restrita:</b> {line_label(scope_choice)}. Outras linhas e custos compartilhados não são exibidos.</div>", unsafe_allow_html=True)
 
     st.markdown("#### Navegação")
-    pages = ["Dashboard", "Recebimentos & inadimplência", "Clientes", "Produtos", "Custos diretos"]
+    pages = ["Dashboard", "Desempenho & metas", "Recebimentos & inadimplência", "Clientes", "Produtos", "Custos diretos"]
     if is_director:
         pages.insert(1, "Linhas de negócio")
     page = st.radio("Navegação", pages, label_visibility="collapsed")
@@ -1167,7 +1276,9 @@ company_monthly = company_cash_monthly(fat, metas, receitas, despesas, performan
 company_totals = totals_from_monthly(company_monthly, False)
 line_monthly = line_cash_monthly(scope_choice, fat, receitas, custos, start_month, end_month) if scope_choice != "CONSOLIDADO" else None
 line_totals = totals_from_monthly(line_monthly, True) if line_monthly is not None else None
-lines_table = line_summary(fat, receitas, custos, start_month, end_month, inad)
+commercial_monthly = commercial_performance_monthly(fat, metas_g, start_month, end_month, scope_choice)
+commercial_totals = commercial_performance_totals(commercial_monthly, metas_g, scope_choice, end_month.year)
+lines_table = line_summary(fat, metas_g, receitas, custos, start_month, end_month, inad)
 fat_scope, rec_scope, cost_scope, inad_scope = scoped_data(scope_choice, fat, receitas, custos, inad, start_month, end_month)
 
 
@@ -1253,12 +1364,32 @@ if page == "Dashboard":
             hide_value_axis(fig, "y")
             st.plotly_chart(plot_layout(fig, 410), width="stretch", config={"displayModeBar": False})
 
-        section_header("Indicadores comerciais", "Faturamento, meta e conversão para o caixa")
+        section_header("Desempenho comercial", "Realizado, meta e projeção")
         s1, s2, s3, s4 = st.columns(4)
-        with s1: card("Faturamento emitido", brl(company_totals["Faturamento"]), "Faturamento emitido no período", BLUE)
-        with s2: card("Conversão em caixa", pct(company_totals["Conversão em Caixa"]), "Receita operacional recebida ÷ faturamento emitido", TEAL)
-        with s3: card("Performance de recebimento", pct(company_totals["Performance de Recebimento"]), "Realizado ÷ previsto", GREEN if company_totals["Performance de Recebimento"] >= .9 else ORANGE)
-        with s4: card("Atingimento da meta", pct(company_totals["Atingimento da Meta"]), "Indicador comercial por competência", CYAN)
+        with s1: card("Faturamento realizado", brl(commercial_totals["Faturamento"]), "Vendas emitidas no período", BLUE)
+        with s2: card("Meta acumulada", brl(commercial_totals["Meta"]), "Meta comercial do mesmo período", NAVY)
+        with s3: card("Atingimento da meta", pct(commercial_totals["Atingimento"]), "Faturamento ÷ meta", BLUE if commercial_totals["Atingimento"] >= 1 else RED)
+        with s4: card("Desvio da meta", brl(commercial_totals["Desvio"]), "Realizado menos meta", BLUE if commercial_totals["Desvio"] >= 0 else RED)
+
+        s5, s6, s7, s8 = st.columns(4)
+        with s5: card("Meta anual", brl(commercial_totals["Meta Anual"]), f"Meta cadastrada para {end_month.year}", NAVY)
+        with s6: card("Projeção anual", brl(commercial_totals["Projeção Anual"]), "Ritmo médio do período anualizado", CYAN)
+        with s7: card("Atingimento projetado", pct(commercial_totals["Atingimento Projetado"]), "Projeção anual ÷ meta anual", BLUE if commercial_totals["Atingimento Projetado"] >= 1 else RED)
+        with s8: card("Conversão em caixa", pct(company_totals["Conversão em Caixa"]), "Receita operacional recebida ÷ faturamento", TEAL)
+
+        perf_fig = go.Figure()
+        perf_fig.add_bar(
+            x=commercial_monthly["Mês Texto"], y=commercial_monthly["Faturamento"], name="Faturamento", marker_color=BLUE,
+            text=commercial_monthly["Faturamento"].map(compact_money), textposition="outside", cliponaxis=False,
+        )
+        perf_fig.add_scatter(
+            x=commercial_monthly["Mês Texto"], y=commercial_monthly["Meta"], name="Meta", mode="lines+markers",
+            line=dict(color=NAVY, width=3, dash="dot"), marker=dict(size=7),
+        )
+        add_point_labels(perf_fig, commercial_monthly["Mês Texto"], commercial_monthly["Meta"], commercial_monthly["Meta"].map(compact_money), color=NAVY)
+        perf_fig.update_layout(title="Faturamento realizado x meta mensal")
+        hide_value_axis(perf_fig, "y")
+        st.plotly_chart(plot_layout(perf_fig, 410), width="stretch", config={"displayModeBar": False})
 
         insights = []
         neg_months = company_monthly[company_monthly["Resultado Operacional de Caixa"] < 0]
@@ -1322,6 +1453,27 @@ if page == "Dashboard":
             hide_value_axis(fig, "y")
             st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
 
+        section_header("Desempenho comercial", "Resultado da linha frente à meta")
+        p1, p2, p3, p4 = st.columns(4)
+        with p1: card("Faturamento realizado", brl(commercial_totals["Faturamento"]), "Faturamento da linha no período", BLUE)
+        with p2: card("Meta acumulada", brl(commercial_totals["Meta"]), "Meta do gestor no período", NAVY)
+        with p3: card("Atingimento da meta", pct(commercial_totals["Atingimento"]), "Faturamento ÷ meta", BLUE if commercial_totals["Atingimento"] >= 1 else RED)
+        with p4: card("Desvio da meta", brl(commercial_totals["Desvio"]), "Realizado menos meta", BLUE if commercial_totals["Desvio"] >= 0 else RED)
+
+        line_perf_fig = go.Figure()
+        line_perf_fig.add_bar(
+            x=commercial_monthly["Mês Texto"], y=commercial_monthly["Faturamento"], name="Faturamento", marker_color=BLUE,
+            text=commercial_monthly["Faturamento"].map(compact_money), textposition="outside", cliponaxis=False,
+        )
+        line_perf_fig.add_scatter(
+            x=commercial_monthly["Mês Texto"], y=commercial_monthly["Meta"], name="Meta", mode="lines+markers",
+            line=dict(color=NAVY, width=3, dash="dot"), marker=dict(size=7),
+        )
+        add_point_labels(line_perf_fig, commercial_monthly["Mês Texto"], commercial_monthly["Meta"], commercial_monthly["Meta"].map(compact_money), color=NAVY)
+        line_perf_fig.update_layout(title=f"Faturamento x meta · {scope_text}")
+        hide_value_axis(line_perf_fig, "y")
+        st.plotly_chart(plot_layout(line_perf_fig, 390), width="stretch", config={"displayModeBar": False})
+
         section_header("Clientes e custos que formam o resultado", "Abertura restrita à linha selecionada")
         c1, c2 = st.columns(2)
         with c1:
@@ -1343,6 +1495,159 @@ if page == "Dashboard":
                               hovertemplate="%{customdata[0]}<br>Valor: R$ %{x:,.2f}<extra></extra>")
             hide_value_axis(fig, "x")
             st.plotly_chart(plot_layout(fig, 440, False), width="stretch", config={"displayModeBar": False})
+
+
+# =========================================================
+# DESEMPENHO E METAS
+# =========================================================
+elif page == "Desempenho & metas":
+    section_header("Desempenho e metas", "Acompanhamento comercial do período", scope_text)
+
+    selected_scope = scope_choice
+    selected_lines = LINES
+    if is_director:
+        selected_lines = st.multiselect(
+            "Linhas consideradas", LINES, default=LINES, format_func=line_label, key="performance_lines_filter"
+        )
+
+    if is_director and scope_choice == "CONSOLIDADO" and selected_lines and set(selected_lines) != set(LINES):
+        perf_frames = [commercial_performance_monthly(fat, metas_g, start_month, end_month, line) for line in selected_lines]
+        perf_monthly = pd.concat(perf_frames).groupby("Mês", as_index=False)[["Faturamento", "Meta", "Desvio"]].sum()
+        perf_monthly["Atingimento"] = np.where(perf_monthly["Meta"] != 0, perf_monthly["Faturamento"] / perf_monthly["Meta"], 0)
+        perf_monthly["Mês Texto"] = perf_monthly["Mês"].map(month_label)
+        actual = float(perf_monthly["Faturamento"].sum())
+        target = float(perf_monthly["Meta"].sum())
+        annual_target = 0.0
+        for line in selected_lines:
+            line_full = commercial_performance_totals(
+                commercial_performance_monthly(fat, metas_g, start_month, end_month, line), metas_g, line, end_month.year
+            )
+            annual_target += line_full["Meta Anual"]
+        projection = safe_div(actual, max(len(perf_monthly), 1)) * 12
+        perf_totals = {
+            "Faturamento": actual, "Meta": target, "Desvio": actual - target, "Atingimento": safe_div(actual, target),
+            "Média Mensal": safe_div(actual, max(len(perf_monthly), 1)), "Meta Anual": annual_target,
+            "Projeção Anual": projection, "Atingimento Projetado": safe_div(projection, annual_target),
+        }
+    else:
+        perf_monthly = commercial_monthly.copy()
+        perf_totals = commercial_totals.copy()
+
+    p1, p2, p3, p4 = st.columns(4)
+    with p1: card("Faturamento realizado", brl(perf_totals["Faturamento"]), "Resultado comercial do período", BLUE)
+    with p2: card("Meta acumulada", brl(perf_totals["Meta"]), "Meta correspondente ao período", NAVY)
+    with p3: card("Atingimento", pct(perf_totals["Atingimento"]), "Faturamento ÷ meta", BLUE if perf_totals["Atingimento"] >= 1 else RED)
+    with p4: card("Desvio", brl(perf_totals["Desvio"]), "Realizado menos meta", BLUE if perf_totals["Desvio"] >= 0 else RED)
+
+    p5, p6, p7, p8 = st.columns(4)
+    with p5: card("Média mensal", brl(perf_totals["Média Mensal"]), "Média do período selecionado", CYAN)
+    with p6: card("Meta anual", brl(perf_totals["Meta Anual"]), f"Objetivo comercial de {end_month.year}", NAVY)
+    with p7: card("Projeção anual", brl(perf_totals["Projeção Anual"]), "Ritmo médio anualizado", BLUE)
+    with p8: card("Atingimento projetado", pct(perf_totals["Atingimento Projetado"]), "Projeção ÷ meta anual", BLUE if perf_totals["Atingimento Projetado"] >= 1 else RED)
+
+    c1, c2 = st.columns([1.35, 1])
+    with c1:
+        fig = go.Figure()
+        fig.add_bar(
+            x=perf_monthly["Mês Texto"], y=perf_monthly["Faturamento"], name="Faturamento", marker_color=BLUE,
+            text=perf_monthly["Faturamento"].map(compact_money), textposition="outside", cliponaxis=False,
+        )
+        fig.add_scatter(
+            x=perf_monthly["Mês Texto"], y=perf_monthly["Meta"], name="Meta", mode="lines+markers",
+            line=dict(color=NAVY, width=3, dash="dot"), marker=dict(size=7),
+        )
+        add_point_labels(fig, perf_monthly["Mês Texto"], perf_monthly["Meta"], perf_monthly["Meta"].map(compact_money), color=NAVY)
+        fig.update_layout(title="Faturamento x meta mensal")
+        hide_value_axis(fig, "y")
+        st.plotly_chart(plot_layout(fig, 430), width="stretch", config={"displayModeBar": False})
+    with c2:
+        att = perf_monthly.copy()
+        colors = [BLUE if value >= 1 else RED for value in att["Atingimento"]]
+        fig = go.Figure(go.Bar(
+            x=att["Mês Texto"], y=att["Atingimento"], marker_color=colors,
+            text=att["Atingimento"].map(pct), textposition="outside", cliponaxis=False,
+            hovertemplate="%{x}<br>Atingimento: %{y:.1%}<extra></extra>",
+        ))
+        fig.add_hline(y=1, line_dash="dot", line_color=NAVY, line_width=2)
+        fig.update_layout(title="Atingimento mensal")
+        hide_value_axis(fig, "y")
+        st.plotly_chart(plot_layout(fig, 430, False), width="stretch", config={"displayModeBar": False})
+
+    if is_director and scope_choice == "CONSOLIDADO":
+        section_header("Desempenho por linha", "Comparação comercial e financeira", "Diretoria")
+        line_perf = lines_table[lines_table["Código"].isin(selected_lines)].copy() if selected_lines else lines_table.copy()
+        score = line_perf[[
+            "Linha", "Faturamento", "Meta", "Atingimento da Meta", "Desvio da Meta",
+            "Receitas Recebidas", "Conversão em Caixa", "Resultado Direto de Caixa",
+            "Margem Direta de Caixa", "Inadimplência"
+        ]].copy()
+        score["Inadimplência / faturamento"] = np.where(score["Faturamento"] != 0, score["Inadimplência"] / score["Faturamento"], 0)
+        score["Status"] = np.select(
+            [score["Atingimento da Meta"] >= 1, score["Atingimento da Meta"] >= .9],
+            ["Meta atingida", "Próximo da meta"], default="Abaixo da meta"
+        )
+
+        chart = line_perf.sort_values("Atingimento da Meta")
+        fig = go.Figure(go.Bar(
+            x=chart["Atingimento da Meta"], y=chart["Linha"], orientation="h",
+            marker_color=[BLUE if value >= 1 else RED for value in chart["Atingimento da Meta"]],
+            text=chart["Atingimento da Meta"].map(pct), textposition="outside", cliponaxis=False,
+        ))
+        fig.add_vline(x=1, line_dash="dot", line_color=NAVY, line_width=2)
+        fig.update_layout(title="Atingimento da meta por linha", showlegend=False)
+        hide_value_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, 390, False), width="stretch", config={"displayModeBar": False})
+
+        score_view = score.copy()
+        for col in ["Faturamento", "Meta", "Desvio da Meta", "Receitas Recebidas", "Resultado Direto de Caixa", "Inadimplência"]:
+            score_view[col] = score_view[col].map(brl)
+        for col in ["Atingimento da Meta", "Conversão em Caixa", "Margem Direta de Caixa", "Inadimplência / faturamento"]:
+            score_view[col] = score_view[col].map(pct)
+        st.dataframe(score_view, width="stretch", hide_index=True, height=255)
+
+    section_header("Desempenho da equipe", "Faturamento individual frente à meta")
+    seller_perf = seller_performance(fat, metas, start_month, end_month, scope_choice)
+    sf1, sf2, sf3 = st.columns([1.4, 1, .7])
+    seller_search = sf1.text_input("Buscar vendedor ou representante", key="seller_performance_search")
+    seller_status = sf2.multiselect(
+        "Status", ["Meta atingida", "Próximo da meta", "Abaixo da meta"], key="seller_performance_status"
+    )
+    seller_top = sf3.selectbox("Exibir", [10, 15, 20, 30], index=1, key="seller_performance_top")
+    if seller_search:
+        seller_perf = seller_perf[seller_perf["Vendedor"].astype(str).str.contains(seller_search, case=False, na=False)]
+    if seller_status:
+        seller_perf = seller_perf[seller_perf["Status"].isin(seller_status)]
+    seller_perf = seller_perf.head(seller_top)
+
+    if seller_perf.empty:
+        st.info("Nenhum vendedor encontrado para os filtros selecionados.")
+    else:
+        seller_plot = seller_perf.sort_values("Atingimento")
+        seller_plot["Nome"] = seller_plot["Vendedor"].map(lambda x: short_label(x, 34))
+        fig = go.Figure(go.Bar(
+            x=seller_plot["Atingimento"], y=seller_plot["Nome"], orientation="h",
+            marker_color=[BLUE if value >= 1 else RED for value in seller_plot["Atingimento"]],
+            text=seller_plot["Atingimento"].map(pct), textposition="outside", cliponaxis=False,
+            customdata=seller_plot[["Vendedor", "Faturamento", "Meta", "Desvio"]],
+            hovertemplate="%{customdata[0]}<br>Faturamento: R$ %{customdata[1]:,.2f}<br>Meta: R$ %{customdata[2]:,.2f}<br>Desvio: R$ %{customdata[3]:,.2f}<extra></extra>",
+        ))
+        fig.add_vline(x=1, line_dash="dot", line_color=NAVY, line_width=2)
+        fig.update_layout(title="Atingimento por vendedor", showlegend=False)
+        hide_value_axis(fig, "x")
+        st.plotly_chart(plot_layout(fig, max(390, 42 * len(seller_plot)), False), width="stretch", config={"displayModeBar": False})
+
+        seller_view = seller_perf[["Vendedor", "Faturamento", "Meta", "Atingimento", "Desvio", "Status"]].copy()
+        seller_export = seller_view.copy()
+        seller_view["Faturamento"] = seller_view["Faturamento"].map(brl)
+        seller_view["Meta"] = seller_view["Meta"].map(brl)
+        seller_view["Atingimento"] = seller_view["Atingimento"].map(pct)
+        seller_view["Desvio"] = seller_view["Desvio"].map(brl)
+        st.dataframe(seller_view, width="stretch", hide_index=True, height=360)
+        st.download_button(
+            "Exportar desempenho da equipe", dataframe_download(seller_export, "Desempenho"),
+            file_name=f"desempenho_metas_{scope_choice.lower()}_{start_month}_{end_month}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
 
 # =========================================================
@@ -1407,10 +1712,12 @@ elif page == "Linhas de negócio" and is_director:
         "Custos Diretos Pagos": "Custos Operacionais Diretos",
     })
     view = export_lines.copy()
-    for c in ["Receitas Operacionais Diretas", "Custos Operacionais Diretos", "Resultado Direto de Caixa", "Faturamento", "Inadimplência"]:
-        view[c] = view[c].map(brl)
-    for c in ["Margem Direta de Caixa", "Margem de Contribuição Direta", "Conversão em Caixa"]:
-        view[c] = view[c].map(pct)
+    for c in ["Receitas Operacionais Diretas", "Custos Operacionais Diretos", "Resultado Direto de Caixa", "Faturamento", "Meta", "Desvio da Meta", "Projeção Anual", "Inadimplência"]:
+        if c in view.columns:
+            view[c] = view[c].map(brl)
+    for c in ["Margem Direta de Caixa", "Margem de Contribuição Direta", "Atingimento da Meta", "Atingimento Projetado", "Conversão em Caixa"]:
+        if c in view.columns:
+            view[c] = view[c].map(pct)
     st.dataframe(view, width="stretch", hide_index=True, height=280)
     st.download_button(
         "Exportar comparativo",
