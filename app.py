@@ -577,18 +577,24 @@ def source_bytes(uploaded, default_path: Path | None) -> tuple[bytes | None, str
     return None, "Não localizada"
 
 
-@st.cache_data(show_spinner=False)
+def file_fingerprint(file_bytes: bytes | None) -> str:
+    if not file_bytes:
+        return "sem arquivo"
+    return hashlib.sha256(file_bytes).hexdigest()[:10].upper()
+
+
+@st.cache_data(show_spinner=False, ttl=300)
 def workbook_sheet_states(file_bytes: bytes) -> dict[str, str]:
     wb = load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
     return {ws.title: ws.sheet_state for ws in wb.worksheets}
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300)
 def read_excel_sheet(file_bytes: bytes, sheet_name: str, usecols=None) -> pd.DataFrame:
     return clean_columns(pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name, usecols=usecols, engine="openpyxl"))
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300)
 def read_excel_raw(file_bytes: bytes, sheet_name: str, usecols=None) -> pd.DataFrame:
     return pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name, usecols=usecols, header=None, engine="openpyxl")
 
@@ -631,7 +637,7 @@ def classify_billing_line(row: pd.Series) -> str:
     return "VENDAS"
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300)
 def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     states = workbook_sheet_states(file_bytes)
     needed = ["BANCO DE DADOS FATURAMENTO", "Metas", "Metas Gerentes"]
@@ -837,7 +843,7 @@ def build_price_analysis(fat_scope: pd.DataFrame, price_table: pd.DataFrame, ref
     return direct
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300)
 def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     states = workbook_sheet_states(file_bytes)
     visible = {name for name, state in states.items() if state == "visible"}
@@ -1558,15 +1564,36 @@ with st.sidebar:
     ])
 
     up_base = up_rev = up_inad = None
+    use_session_uploads = False
     if is_director:
         with st.expander("Fontes de dados", expanded=False):
-            up_base = st.file_uploader("Substituir BASE BI", type=["xlsx", "xlsm"], key="up_base_final")
-            up_rev = st.file_uploader("Substituir REV2026", type=["xlsx", "xlsm"], key="up_rev_final")
-            up_inad = st.file_uploader("Relatório do CRM de cobrança", type=["xlsx", "xlsm", "csv"], key="up_inad_final")
+            if st.button("↻ Recarregar bases do repositório", width="stretch", key="reload_repository_files"):
+                for upload_key in ["up_base_final", "up_rev_final", "up_inad_final"]:
+                    st.session_state.pop(upload_key, None)
+                st.session_state["use_session_uploads"] = False
+                st.cache_data.clear()
+                st.rerun()
 
-base_bytes, base_name = source_bytes(up_base, default_base)
-rev_bytes, rev_name = source_bytes(up_rev, default_rev)
-inad_bytes, inad_name = source_bytes(up_inad, default_inad)
+            use_session_uploads = st.toggle(
+                "Usar arquivos enviados nesta sessão",
+                value=False,
+                key="use_session_uploads",
+                help="Desative para usar sempre os arquivos atualizados no GitHub.",
+            )
+            if use_session_uploads:
+                up_base = st.file_uploader("Substituir BASE BI", type=["xlsx", "xlsm"], key="up_base_final")
+                up_rev = st.file_uploader("Substituir REV2026", type=["xlsx", "xlsm"], key="up_rev_final")
+                up_inad = st.file_uploader("Relatório do CRM de cobrança", type=["xlsx", "xlsm", "csv"], key="up_inad_final")
+            else:
+                st.caption("Fonte ativa: arquivos versionados no repositório.")
+
+base_bytes, base_name = source_bytes(up_base if use_session_uploads else None, default_base)
+rev_bytes, rev_name = source_bytes(up_rev if use_session_uploads else None, default_rev)
+inad_bytes, inad_name = source_bytes(up_inad if use_session_uploads else None, default_inad)
+
+base_id = file_fingerprint(base_bytes)
+rev_id = file_fingerprint(rev_bytes)
+inad_id = file_fingerprint(inad_bytes)
 
 if not base_bytes or not rev_bytes:
     st.error("Inclua `BASE BI.xlsx` e `rev2026 Base bi.xlsx` no repositório ou carregue os arquivos na barra lateral.")
@@ -1590,6 +1617,14 @@ try:
 except Exception as exc:
     st.error(f"Não foi possível carregar as bases: {exc}")
     st.stop()
+
+with st.sidebar:
+    with st.expander("Conferência da atualização", expanded=False):
+        origem_rev = "arquivo enviado nesta sessão" if use_session_uploads and up_rev is not None else "repositório"
+        st.markdown(f"**REV2026 ativa:** `{rev_name}`")
+        st.caption(f"Origem: {origem_rev} · Identificador: {rev_id}")
+        st.caption(f"Lançamentos no Centro de Custos: {len(custos):,}".replace(",", "."))
+        st.caption("O identificador muda sempre que o conteúdo do arquivo muda.")
 
 all_periods = pd.concat([fat["_MES"], receitas["_MES"], despesas["_MES"], custos["_MES"], performance["_MES"]]).dropna()
 min_month, max_month = all_periods.min(), all_periods.max()

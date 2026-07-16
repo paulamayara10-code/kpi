@@ -1,84 +1,61 @@
-# First Intelligence — KPIs de Caixa v8
+# First Intelligence | Business Performance
 
-Painel Streamlit em **regime de caixa**, com visão consolidada para a diretoria e acesso restrito por gestor/linha.
+Aplicativo Streamlit com visão consolidada para a diretoria e acessos restritos por gestor de linha.
 
-## Correções desta versão
+## Bases utilizadas
 
-- Removida a dependência `rapidfuzz`, evitando o erro `ModuleNotFoundError` no Streamlit Cloud.
-- A similaridade de clientes agora usa apenas bibliotecas nativas do Python.
-- O relatório do CRM de cobrança foi incluído como fonte padrão: `relatorio_cobranca_gerente.xlsx`.
-- O app reconhece automaticamente as abas `Resumo` e `Titulos detalhados`.
-- Datas numéricas do Excel são convertidas corretamente para o padrão brasileiro.
+- `BASE BI.xlsx`: faturamento, clientes, produtos, gerentes, vendedores e metas.
+- `rev2026 Base bi.xlsx`: receitas e despesas realizadas por centro de custos. Somente abas visíveis são processadas.
+- `base_crm_cobranca.csv`: inadimplência exportada do CRM de cobrança, com cliente, vendedor, gerente, vencimento e saldo atual. O formato Excel anterior permanece compatível.
 
-## Gestores e linhas
+## Visões disponíveis
 
-A atribuição do faturamento usa prioritariamente a coluna **GERENTE** da BASE BI:
+- Dashboard integrado de performance.
+- Desempenho e metas.
+- Comparação das linhas de negócio para a diretoria.
+- Recebimentos e inadimplência.
+- Clientes.
+- Produtos.
+- Centro de custos, com receitas e despesas operacionais e não operacionais.
 
-- Celso → Microtech
-- Renato → Vendas
-- Amauri → Locação
-- Ronaldo → Endoscopia
+Os módulos de preços e estoque permanecem fora desta versão para amadurecimento separado.
 
-Registros de outros gerentes usam a classificação complementar por produto, segmento e tipo de receita.
+## Regra de centro de custos
 
-## Inadimplência do CRM
+Toda visão por departamento e por linha utiliza exclusivamente a coluna `CENTRO DE CUSTOS` da aba visível `Centro de Custos`.
 
-O arquivo atual possui:
+A coluna `CENTRO DE CUSTOS RATEAO` é removida durante o carregamento e não participa de cálculos, filtros ou visualizações.
 
-- `Resumo`: total por gerente, clientes, títulos, valor e maior atraso.
-- `Titulos detalhados`: cliente, título, vencimento, valor corrigido, atraso, histórico e telefones.
+A página **Centro de custos** permite filtrar:
 
-Como a aba detalhada não possui a coluna Gerente, o app relaciona cada cliente ao gerente dominante da BASE BI. A diretoria visualiza também o resumo original exportado pelo CRM para conferência.
+- receitas e despesas;
+- movimentos operacionais e não operacionais;
+- departamento;
+- natureza;
+- fornecedor ou cliente;
+- período.
 
-Campos priorizados no cálculo:
+## Regra da equipe comercial
 
-- Cliente: `Nome`
-- Título: `Prf-Numero Parcela`
-- Vencimento: `Vencto Real`
-- Saldo vencido: `Tit Vencidos Valor Corrigido`
-- Dias de atraso: `Dias Atraso`
+Os rankings, gráficos e tabelas de desempenho exibem somente vendedores ou representantes com participação efetiva e percentual superior a zero no período selecionado.
 
-Para máxima precisão futura, recomenda-se incluir a coluna **Gerente** também na aba de títulos detalhados do relatório do CRM.
+## Perfis
 
-## Nova análise de produtos
+- Diretoria: visão consolidada e comparação entre linhas.
+- Celso: Microtech.
+- Renato: Vendas.
+- Amauri: Locação.
+- Ronaldo: Endoscopia.
 
-A página **Produtos** apresenta, dentro do escopo autorizado:
+Cada gestor visualiza apenas a própria linha, determinada pelo centro de custos direto correspondente.
 
-- faturamento por produto;
-- quantidade faturada ou número de registros, quando não houver quantidade;
-- preço médio;
-- clientes e notas por produto;
-- produto líder;
-- concentração dos dez maiores produtos;
-- ranking por faturamento e volume;
-- exportação da análise em Excel.
+## Publicação
 
-Cada gestor visualiza somente os produtos associados ao próprio gerente/linha.
+1. Envie o conteúdo desta pasta para um repositório privado.
+2. No Streamlit Cloud, selecione `app.py` como arquivo principal.
+3. Copie o conteúdo de `SECRETS_STREAMLIT_PRONTO.toml` para **Manage app → Settings → Secrets**.
+4. Reinicie o aplicativo.
 
-## Controle de acesso
+## Atualização das bases
 
-O arquivo `.streamlit/secrets.toml.example` já contém os hashes das senhas informadas para:
-
-- Celso / Microtech
-- Renato / Vendas
-- Amauri / Locação
-- Ronaldo / Endoscopia
-
-Para publicar:
-
-1. Abra o app no Streamlit Cloud.
-2. Acesse **Manage app > Settings > Secrets**.
-3. Cole o conteúdo de `.streamlit/secrets.toml.example`.
-4. O hash da senha da diretoria já está preenchido para o usuário Paula.
-
-Sem Secrets configurados, o app permanece em modo demonstração para validação.
-
-Acesso da diretoria: usuário `paula` ou e-mail `paulamayara10@gmail.com`. A senha definida pela administradora foi convertida para SHA-256 e não aparece em texto aberto nos arquivos de configuração.
-
-## Fontes do projeto
-
-- `BASE BI.xlsx`
-- `rev2026 Base bi.xlsx`
-- `relatorio_cobranca_gerente.xlsx`
-
-Na REV2026, somente abas visíveis são processadas. Custos compartilhados e rateios não são exibidos aos gestores.
+A diretoria pode substituir as três bases na seção **Fontes de dados** da barra lateral. O CSV do CRM deve utilizar separador `;` e os campos do arquivo modelo incluído no pacote.
