@@ -788,16 +788,18 @@ def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     metas_g = read_excel_sheet(file_bytes, "Metas Gerentes")
     users = read_excel_sheet(file_bytes, "Usuarios") if "Usuarios" in states else pd.DataFrame()
 
-    date_col = require_col(fat, ["DT Emissao", "MÊS"], "BANCO DE DADOS FATURAMENTO")
-    month_col = optional_col(fat, ["MÊS"])
+    month_col = require_col(fat, ["MÊS"], "BANCO DE DADOS FATURAMENTO")
+    date_col = optional_col(fat, ["DT Emissao", "DT EMISSÃO", "DATA EMISSÃO"])
     value_col = require_col(fat, ["VALOR BRUTO", "VALOR ", "VALOR"], "BANCO DE DADOS FATURAMENTO")
-    # O período comercial deve acompanhar a data real da emissão. A coluna MÊS
-    # pode conter fórmula ou resultado salvo e, por isso, é apenas fallback.
-    fat["_DATA"] = to_datetime_mixed(fat[date_col])
-    fat["_MES"] = fat["_DATA"].dt.to_period("M")
-    if month_col:
-        fallback_month = to_datetime_mixed(fat[month_col]).dt.to_period("M")
-        fat["_MES"] = fat["_MES"].where(fat["_MES"].notna(), fallback_month)
+    # Regra oficial da BASE BI: a competência comercial é definida pela coluna MÊS.
+    # A DT Emissão é mantida para auditoria e usada somente como contingência quando
+    # a competência estiver vazia. Isso preserva os lançamentos que a própria base
+    # alocou em 2026, ainda que a emissão tenha ocorrido no fechamento de 2025.
+    fat["_DATA"] = to_datetime_mixed(fat[date_col]) if date_col else pd.NaT
+    official_month = to_datetime_mixed(fat[month_col]).dt.to_period("M")
+    emission_month = fat["_DATA"].dt.to_period("M")
+    fat["_MES"] = official_month.where(official_month.notna(), emission_month)
+    fat["_ORIGEM_MES"] = np.where(official_month.notna(), "MÊS da BASE BI", "DT Emissão (contingência)")
     fat["_VALOR"] = to_number(fat[value_col])
     for col in [
         "GERENTE", "VENDEDOR / REPRESENTANTE", "VENDEDOR", "SEGMENTO", "EMPRESA", "NOVA",
@@ -852,13 +854,20 @@ def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
         fat[note_col_audit].fillna("").astype(str).map(norm).isin(["", "NAO INFORMADO", "NAN"])
         if note_col_audit else pd.Series(True, index=fat.index)
     )
+    emission_year = fat["_DATA"].dt.year if "_DATA" in fat.columns else pd.Series(np.nan, index=fat.index)
+    allocated_from_other_year = in_analysis_year & emission_year.notna() & emission_year.ne(ANALYSIS_YEAR)
+    month_fallback_mask = in_analysis_year & fat["_ORIGEM_MES"].eq("DT Emissão (contingência)")
     billing_audit = {
-        "date_column": date_col,
+        "date_column": date_col or "Não disponível",
+        "month_column": month_col,
         "value_column": value_col,
         "rows_total": int(len(fat)),
         "rows_without_month": int((~valid_date).sum()),
         "rows_2026": int(in_analysis_year.sum()),
         "value_2026": float(fat.loc[in_analysis_year, "_VALOR"].sum()),
+        "rows_emission_outside_2026": int(allocated_from_other_year.sum()),
+        "value_emission_outside_2026": float(fat.loc[allocated_from_other_year, "_VALOR"].sum()),
+        "rows_month_fallback_2026": int(month_fallback_mask.sum()),
         "zero_value_rows_2026": int((zero_mask & in_analysis_year).sum()),
         "negative_value_rows_2026": int((negative_mask & in_analysis_year).sum()),
         "negative_value_2026": float(fat.loc[negative_mask & in_analysis_year, "_VALOR"].sum()),
@@ -1466,10 +1475,15 @@ def password_hash(password: str) -> str:
 
 
 DEFAULT_USERS = {
-    "paula": {
-        "nome": "Diretoria", "usuario": "paula", "email": "paulamayara10@gmail.com",
+    "diretoria": {
+        "nome": "Diretoria", "usuario": "diretoria", "email": "",
         "senha_hash": "cbae32987728a10b19e2528695dbf676c9b8de0f539bab08b5789c2e9f0d8599",
         "perfil": "DIRETORIA", "linha": "CONSOLIDADO",
+    },
+    "paula": {
+        "nome": "Paula", "usuario": "paula", "email": "paulamayara10@gmail.com",
+        "senha_hash": "ad27a22ae449782700c94a3acfa95e19cb5b3a3907b7da088d11569d32bfe800",
+        "perfil": "CONTROLADORIA", "linha": "CONSOLIDADO",
     },
     "celso": {
         "nome": "Celso", "usuario": "celso", "email": "",
@@ -1508,10 +1522,11 @@ def secret_users() -> dict[str, dict]:
 def authenticate() -> dict[str, str]:
     users = secret_users()
     if "auth_user" not in st.session_state:
-        profile_order = ["paula", "celso", "renato", "amauri", "ronaldo"]
+        profile_order = ["diretoria", "paula", "celso", "renato", "amauri", "ronaldo"]
         available = [key for key in profile_order if key in users]
         profile_labels = {
-            "paula": "Diretoria",
+            "diretoria": "Diretoria",
+            "paula": "Paula · Controladoria",
             "celso": "Celso · Microtech",
             "renato": "Renato · Vendas",
             "amauri": "Amauri · Locação",
@@ -2520,7 +2535,7 @@ def build_business_performance_pdf(
     notes = [
         ["Regime de análise", "Os indicadores financeiros principais são gerenciais em regime de caixa."],
         ["Linhas de negócio", "Receitas, despesas, margens e resultados diretos são determinados exclusivamente pela coluna Centro de Custos. O Centro de Custos Rateado aparece apenas como informação de contribuição às despesas gerais e não altera os cálculos."],
-        ["Faturamento e metas", "São indicadores comerciais por competência e aparecem separados dos resultados financeiros realizados."],
+        ["Faturamento e metas", "São indicadores comerciais por competência. O faturamento usa a coluna MÊS da BASE BI e a DT Emissão permanece como referência de auditoria."],
         ["Inadimplência", "O saldo é obtido do relatório ativo do CRM de cobrança, conforme o perfil e a linha atribuídos."],
         ["Margem de contribuição de caixa", "Receitas operacionais recebidas menos saídas variáveis pagas, dividido pelas receitas operacionais recebidas."],
         ["Limitação", "O relatório gerencial não substitui demonstrações contábeis oficiais ou conciliações do balancete."],
@@ -2871,7 +2886,16 @@ def build_business_performance_print_html(
 # FONTES, USUÁRIO E FILTROS
 # =========================================================
 user = authenticate()
+is_controladoria = user["perfil"] in {"CONTROLADORIA", "ADMIN"}
 is_director = user["perfil"] in {"DIRETORIA", "ADMIN", "CONTROLADORIA"}
+can_validate = is_controladoria
+can_manage_sources = is_controladoria
+access_label = (
+    "Controladoria" if is_controladoria
+    else "Diretoria" if user["perfil"] == "DIRETORIA"
+    else line_label(user["linha"])
+)
+access_note = "Acesso de validação" if is_controladoria else ("Acesso executivo" if is_director else "Acesso por linha")
 
 with st.sidebar:
     st.markdown(
@@ -2883,7 +2907,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.markdown(
-        f"<div class='user-pill'><div class='left'><span class='avatar'></span><div><b>{user['nome']}</b><small>{'Acesso executivo' if is_director else 'Acesso por linha'}</small></div></div><span>{'Diretoria' if is_director else line_label(user['linha'])}</span></div>",
+        f"<div class='user-pill'><div class='left'><span class='avatar'></span><div><b>{user['nome']}</b><small>{access_note}</small></div></div><span>{access_label}</span></div>",
         unsafe_allow_html=True,
     )
     if secret_users() and st.button("Sair", width="stretch"):
@@ -2902,7 +2926,7 @@ with st.sidebar:
 
     up_base = up_rev = up_inad = None
     use_session_uploads = False
-    if is_director:
+    if can_manage_sources:
         with st.expander("Fontes de dados", expanded=False):
             if len(base_repo_files) > 1:
                 selected_base_name = st.selectbox(
@@ -3020,6 +3044,7 @@ with st.sidebar:
     pages = ["Dashboard", "Desempenho & metas", "Recebimentos & inadimplência", "Clientes", "Produtos", "Centro de custos", "Relatório para impressão"]
     if is_director:
         pages.insert(1, "Linhas de negócio")
+    if can_validate:
         pages.insert(-1, "Validação dos dados")
     if "nav_page" not in st.session_state or st.session_state.get("nav_page") not in pages:
         st.session_state["nav_page"] = pages[0]
@@ -3042,7 +3067,7 @@ st.markdown(
         <div class='hero-chips'>
           <span class='hero-chip'>{period_text}</span>
           <span class='hero-chip'>{scope_text}</span>
-          <span class='hero-chip'>{'Acesso diretoria' if is_director else 'Acesso restrito'}</span>
+          <span class='hero-chip'>{'Acesso controladoria' if is_controladoria else ('Acesso diretoria' if is_director else 'Acesso restrito')}</span>
         </div>
       </div>
     </div>
@@ -3825,7 +3850,7 @@ elif page == "Produtos":
 # =========================================================
 # VALIDAÇÃO DOS DADOS — SOMENTE DIRETORIA
 # =========================================================
-elif page == "Validação dos dados" and is_director:
+elif page == "Validação dos dados" and can_validate:
     section_header("Validação dos dados", "Conciliação técnica", "Faturamento, linhas, datas e rateio sem alterar os indicadores")
 
     validation, validation_lines, validation_managers, validation_monthly = billing_reconciliation(
@@ -3889,18 +3914,20 @@ elif page == "Validação dos dados" and is_director:
 
     section_header("Integridade da BASE BI", badge=base_name)
     b1, b2, b3, b4 = st.columns(4)
-    with b1: card("Linhas de 2026", f"{int(billing_audit.get('rows_2026', len(fat))):,}".replace(",", "."), "Registros com data válida em 2026", NAVY)
-    with b2: card("Linhas sem mês", f"{int(billing_audit.get('rows_without_month', 0)):,}".replace(",", "."), "Não entram nos filtros mensais", RED if billing_audit.get('rows_without_month', 0) else BLUE)
+    with b1: card("Faturamento validado", brl(float(billing_audit.get('value_2026', 0))), f"{int(billing_audit.get('rows_2026', len(fat))):,} linhas na competência 2026".replace(",", "."), NAVY)
+    with b2: card("Emissões de outro ano", brl(float(billing_audit.get('value_emission_outside_2026', 0))), f"{int(billing_audit.get('rows_emission_outside_2026', 0)):,} linhas mantidas em 2026 pela coluna MÊS".replace(",", "."), BLUE)
     with b3: card("Linhas com valor zero", f"{int(billing_audit.get('zero_value_rows_2026', 0)):,}".replace(",", "."), "Permanecem na base, mas não alteram o total", CYAN)
     with b4: card("Linhas sem nota fiscal", f"{int(billing_audit.get('missing_note_rows_2026', 0)):,}".replace(",", "."), "Podem exigir conferência na origem", CYAN)
 
     st.caption(
-        f"Coluna de data: {billing_audit.get('date_column', 'não identificada')} · "
+        f"Competência oficial: {billing_audit.get('month_column', 'MÊS')} · "
+        f"Data de auditoria: {billing_audit.get('date_column', 'não identificada')} · "
         f"Coluna de faturamento: {billing_audit.get('value_column', 'não identificada')} · "
-        "o painel soma VALOR BRUTO por DT Emissão e considera somente 2026. "
+        "o painel soma VALOR BRUTO pela coluna MÊS da BASE BI e considera somente as competências de 2026. "
+        f"A DT Emissão é usada apenas quando MÊS estiver vazio ({int(billing_audit.get('rows_month_fallback_2026', 0))} linha(s) em contingência). "
         f"Valores negativos: {int(billing_audit.get('negative_value_rows_2026', 0))} linha(s), "
         f"total de {brl(float(billing_audit.get('negative_value_2026', 0)))}. "
-        "Linhas comerciais idênticas não são excluídas automaticamente, pois podem representar unidades distintas em locação."
+        f"Linhas sem competência: {int(billing_audit.get('rows_without_month', 0))}."
     )
 
     section_header("Validação do Centro de Custos Rateado", badge=rev_name)
