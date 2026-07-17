@@ -570,6 +570,35 @@ def first_existing(candidates: Iterable[str]) -> Path | None:
     return None
 
 
+def repository_files(kind: str) -> list[Path]:
+    """Localiza fontes do repositório e evita que uma cópia antiga fique invisível."""
+    here = Path(__file__).resolve().parent
+    found: list[Path] = []
+    for path in here.glob("*.xls*"):
+        if path.name.startswith("~$"):
+            continue
+        name = norm(path.stem)
+        if kind == "base" and "BASE" in name and "BI" in name and "REV2026" not in name:
+            found.append(path)
+        elif kind == "rev" and "REV2026" in name and "BASE" in name and "BI" in name:
+            found.append(path)
+    # Mantém nomes canônicos primeiro e remove duplicidades.
+    preferred = {
+        "base": ["BASE BI.xlsx", "BASE BI.xlsm", "BASE BI(1).xlsx", "base_bi.xlsx"],
+        "rev": ["rev2026 Base bi.xlsx", "rev2026 Base bi.xlsm", "rev2026 Base bi(1).xlsx", "REV2026.xlsx"],
+    }[kind]
+    order = {name.casefold(): idx for idx, name in enumerate(preferred)}
+    unique = {str(p.resolve()): p for p in found}
+    return sorted(unique.values(), key=lambda p: (order.get(p.name.casefold(), 999), p.name.casefold()))
+
+
+def preferred_repository_file(files: list[Path], canonical_name: str) -> Path | None:
+    for path in files:
+        if path.name.casefold() == canonical_name.casefold():
+            return path
+    return files[0] if files else None
+
+
 def source_bytes(uploaded, default_path: Path | None) -> tuple[bytes | None, str]:
     if uploaded is not None:
         return uploaded.getvalue(), uploaded.name
@@ -2481,8 +2510,10 @@ with st.sidebar:
         st.session_state.pop("auth_user", None)
         st.rerun()
 
-    default_base = first_existing(["BASE BI.xlsx", "BASE BI(1).xlsx", "base_bi.xlsx"])
-    default_rev = first_existing(["rev2026 Base bi.xlsx", "rev2026 Base bi(1).xlsx", "REV2026.xlsx"])
+    base_repo_files = repository_files("base")
+    rev_repo_files = repository_files("rev")
+    default_base = preferred_repository_file(base_repo_files, "BASE BI.xlsx")
+    default_rev = preferred_repository_file(rev_repo_files, "rev2026 Base bi.xlsx")
     default_inad = first_existing([
         "base_crm_cobranca.csv",
         "relatorio_cobranca_gerente.xlsx", "relatorio_cobranca_gerente_2026-07-13.xlsx",
@@ -2493,10 +2524,36 @@ with st.sidebar:
     use_session_uploads = False
     if is_director:
         with st.expander("Fontes de dados", expanded=False):
-            if st.button("↻ Recarregar bases do repositório", width="stretch", key="reload_repository_files"):
+            if len(base_repo_files) > 1:
+                selected_base_name = st.selectbox(
+                    "BASE BI do repositório",
+                    [p.name for p in base_repo_files],
+                    index=[p.name for p in base_repo_files].index(default_base.name),
+                    key="repository_base_choice",
+                    help="Quando houver cópias com nomes diferentes, selecione explicitamente a base que deve ser usada.",
+                )
+                default_base = next(p for p in base_repo_files if p.name == selected_base_name)
+                st.warning("Há mais de uma BASE BI no repositório. Exclua a cópia antiga para evitar atualizações na base errada.")
+            elif default_base:
+                st.caption(f"BASE BI do repositório: `{default_base.name}`")
+
+            if len(rev_repo_files) > 1:
+                selected_rev_name = st.selectbox(
+                    "REV2026 do repositório",
+                    [p.name for p in rev_repo_files],
+                    index=[p.name for p in rev_repo_files].index(default_rev.name),
+                    key="repository_rev_choice",
+                )
+                default_rev = next(p for p in rev_repo_files if p.name == selected_rev_name)
+                st.warning("Há mais de uma REV2026 no repositório. Exclua a cópia antiga para evitar leituras incorretas.")
+            elif default_rev:
+                st.caption(f"REV2026 do repositório: `{default_rev.name}`")
+
+            if st.button("↻ Recarregar BASE BI e REV2026", width="stretch", key="reload_repository_files"):
                 for upload_key in ["up_base_final", "up_rev_final", "up_inad_final"]:
                     st.session_state.pop(upload_key, None)
                 st.session_state["use_session_uploads"] = False
+                st.session_state.pop("_active_source_ids", None)
                 st.cache_data.clear()
                 st.rerun()
 
@@ -2520,6 +2577,12 @@ inad_bytes, inad_name = source_bytes(up_inad if use_session_uploads else None, d
 base_id = file_fingerprint(base_bytes)
 rev_id = file_fingerprint(rev_bytes)
 inad_id = file_fingerprint(inad_bytes)
+
+# Se qualquer arquivo versionado mudar, invalida automaticamente todas as leituras derivadas.
+active_source_ids = {"base": base_id, "rev": rev_id, "inad": inad_id}
+if st.session_state.get("_active_source_ids") != active_source_ids:
+    st.cache_data.clear()
+    st.session_state["_active_source_ids"] = active_source_ids
 
 if not base_bytes or not rev_bytes:
     st.error("Inclua `BASE BI.xlsx` e `rev2026 Base bi.xlsx` no repositório ou carregue os arquivos na barra lateral.")
@@ -2546,11 +2609,21 @@ except Exception as exc:
 
 with st.sidebar:
     with st.expander("Conferência da atualização", expanded=False):
+        origem_base = "arquivo enviado nesta sessão" if use_session_uploads and up_base is not None else "repositório"
         origem_rev = "arquivo enviado nesta sessão" if use_session_uploads and up_rev is not None else "repositório"
+
+        max_fat_date = fat["_DATA"].max() if "_DATA" in fat.columns and not fat.empty else pd.NaT
+        max_fat_text = max_fat_date.strftime("%d/%m/%Y") if pd.notna(max_fat_date) else "sem data"
+        total_fat_base = float(fat["_VALOR"].sum()) if "_VALOR" in fat.columns else 0.0
+
+        st.markdown(f"**BASE BI ativa:** `{base_name}`")
+        st.caption(f"Origem: {origem_base} · Identificador: {base_id}")
+        st.caption(f"Faturamento: {len(fat):,} linhas · última emissão: {max_fat_text}".replace(",", "."))
+        st.caption(f"Total bruto carregado: {brl(total_fat_base)}")
         st.markdown(f"**REV2026 ativa:** `{rev_name}`")
         st.caption(f"Origem: {origem_rev} · Identificador: {rev_id}")
         st.caption(f"Lançamentos no Centro de Custos: {len(custos):,}".replace(",", "."))
-        st.caption("O identificador muda sempre que o conteúdo do arquivo muda.")
+        st.caption("Os identificadores mudam sempre que o conteúdo dos arquivos muda.")
 
 all_periods = pd.concat([fat["_MES"], receitas["_MES"], despesas["_MES"], custos["_MES"], performance["_MES"]]).dropna()
 min_month, max_month = all_periods.min(), all_periods.max()
