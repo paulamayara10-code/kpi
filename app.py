@@ -152,18 +152,6 @@ st.markdown(
 
     .scope-note {{ background:#EDF4FA; border:1px solid #C9DDED; border-radius:13px; padding:11px 13px; color:#234F74; font-size:.77rem; line-height:1.45; }}
     .warning-note {{ background:#F2F7FB; border:1px solid #CCDDEC; border-radius:13px; padding:11px 13px; color:#315A7B; font-size:.77rem; line-height:1.45; }}
-    .rateio-info {{
-        display:flex; align-items:center; justify-content:space-between; gap:18px; flex-wrap:wrap;
-        background:linear-gradient(120deg,#EAF3FA 0%,#F8FBFE 100%); border:1px solid #C8DDED;
-        border-left:5px solid {CYAN}; border-radius:16px; padding:13px 16px; margin:8px 0 12px;
-        box-shadow:0 6px 18px rgba(7,27,51,.045);
-    }}
-    .rateio-info .rateio-copy {{ min-width:240px; flex:1; }}
-    .rateio-info .rateio-label {{ color:{NAVY}; font-size:.76rem; font-weight:900; letter-spacing:.045em; text-transform:uppercase; }}
-    .rateio-info .rateio-note {{ color:#52677C; font-size:.73rem; line-height:1.42; margin-top:4px; }}
-    .rateio-info .rateio-value {{ color:{NAVY}; font-size:1.38rem; font-weight:950; letter-spacing:-.035em; white-space:nowrap; }}
-    .rateio-chips {{ display:flex; flex-wrap:wrap; gap:6px; width:100%; }}
-    .rateio-chip {{ background:#FFFFFF; border:1px solid #D6E4EF; border-radius:999px; padding:5px 9px; color:#315A7B; font-size:.68rem; font-weight:800; }}
     .secure-note {{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:10px 12px; color:#EAF4FB; font-size:.73rem; line-height:1.4; }}
     .login-brand {{ text-align:center; margin:3.8rem auto 1.2rem auto; }}
     .login-brand .logo {{ color:#071B33; font-size:1.55rem; font-weight:950; letter-spacing:.15em; }}
@@ -227,6 +215,14 @@ def client_key(value: object) -> str:
     text = norm(value)
     text = re.sub(r"[^A-Z0-9 ]", " ", text)
     text = re.sub(r"\b(LTDA|EPP|EIRELI|ME|S A|SA|ASSOCIACAO|FUNDACAO)\b", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def seller_key(value: object) -> str:
+    """Normaliza nomes de vendedores/representantes para cruzamento com a aba Metas."""
+    text = norm(value)
+    text = re.sub(r"[^A-Z0-9 ]", " ", text)
+    text = re.sub(r"\b(LTDA|LT|EPP|EIRELI|ME|S A|SA)\b", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -384,36 +380,6 @@ def rateio_line_key(value: object) -> str:
         return "VENDAS"
     return "NAO CLASSIFICADA"
 
-
-def rateio_info(total: float, scope: str, breakdown: dict[str, float] | None = None) -> None:
-    """Exibe o rateio apenas como transparência, sem compor o resultado direto."""
-    consolidated = scope == "CONSOLIDADO"
-    label = "Despesas gerais distribuídas às linhas" if consolidated else "Contribuição às despesas gerais"
-    note = (
-        "Despesas dos departamentos gerais distribuídas à linha pela coluna Centro de Custos Rateado. "
-        "O valor é apenas informativo e não altera receitas, despesas, margem ou resultado direto."
-    )
-    chips = ""
-    if consolidated and breakdown:
-        chip_items = []
-        for line in LINES:
-            chip_items.append(
-                f"<span class='rateio-chip'>{html.escape(line_label(line))}: {html.escape(brl(float(breakdown.get(line, 0))))}</span>"
-            )
-        chips = "<div class='rateio-chips'>" + "".join(chip_items) + "</div>"
-    st.markdown(
-        f"""
-        <div class='rateio-info'>
-          <div class='rateio-copy'>
-            <div class='rateio-label'>{html.escape(label)}</div>
-            <div class='rateio-note'>{html.escape(note)}</div>
-          </div>
-          <div class='rateio-value'>{html.escape(brl(float(total or 0)))}</div>
-          {chips}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 def card(label: str, value: str, note: str = "", tone: str = CYAN, delta: str = "", bad: bool = False) -> None:
@@ -1788,42 +1754,114 @@ def seller_performance(
     fat: pd.DataFrame, metas: pd.DataFrame, start: pd.Period, end: pd.Period,
     line: str = "CONSOLIDADO",
 ) -> pd.DataFrame:
+    """Apura a equipe pela aba Metas e usa o faturamento somente como realizado.
+
+    A aba Metas é a fonte oficial para definir quais vendedores/representantes
+    pertencem à equipe de cada gerente. O Banco de Dados de Faturamento continua
+    sendo utilizado apenas para somar o valor realizado de cada integrante.
+
+    O cruzamento aceita:
+    - nome idêntico após normalização;
+    - nome resumido da meta contido no nome completo do faturamento;
+    - aproximação textual forte para pequenas diferenças cadastrais.
+
+    Faturamentos que não encontram integrante na aba Metas não são atribuídos
+    automaticamente a outra pessoa. Permanecem no total da linha e são informados
+    à Controladoria como valor sem vínculo com a equipe da meta.
+    """
     fbase = period_filter(fat, start, end).copy()
     mbase = period_filter(metas, start, end).copy()
+
     if line != "CONSOLIDADO":
         fbase = billing_by_line(fbase, line)
         manager = LINE_MANAGER_MAP.get(line, "")
         if "GERENTE" in mbase.columns:
             mbase = mbase[mbase["GERENTE"].map(norm) == manager]
 
-    seller_col = "VENDEDOR / REPRESENTANTE" if "VENDEDOR / REPRESENTANTE" in fbase.columns else "VENDEDOR"
-    fbase["_SELLER_KEY"] = fbase[seller_col].map(norm)
-    mbase["_SELLER_KEY"] = mbase["VENDEDOR"].map(norm) if "VENDEDOR" in mbase.columns else "NAO INFORMADO"
+    if mbase.empty or "VENDEDOR" not in mbase.columns:
+        empty = pd.DataFrame(columns=["Vendedor", "Faturamento", "Meta", "Desvio", "Atingimento", "Status"])
+        empty.attrs["unmatched_total"] = float(fbase["_VALOR"].sum()) if "_VALOR" in fbase.columns else 0.0
+        empty.attrs["matched_total"] = 0.0
+        return empty
 
-    actual = fbase.groupby("_SELLER_KEY", as_index=False)["_VALOR"].sum().rename(columns={"_VALOR": "Faturamento"})
-    actual_names = fbase.groupby("_SELLER_KEY", as_index=False)[seller_col].first().rename(columns={seller_col: "Vendedor"})
-    goals = mbase.groupby("_SELLER_KEY", as_index=False)["_META"].sum().rename(columns={"_META": "Meta"})
-    goal_names = mbase.groupby("_SELLER_KEY", as_index=False)["VENDEDOR"].first().rename(columns={"VENDEDOR": "Vendedor Meta"}) if "VENDEDOR" in mbase.columns else pd.DataFrame(columns=["_SELLER_KEY", "Vendedor Meta"])
+    # A equipe e os nomes exibidos vêm exclusivamente da aba Metas.
+    mbase["_ROSTER_KEY"] = mbase["VENDEDOR"].map(seller_key)
+    mbase = mbase[~mbase["_ROSTER_KEY"].isin(["", "NAO INFORMADO"])].copy()
+    roster = (
+        mbase.groupby("_ROSTER_KEY", as_index=False)
+        .agg(Vendedor=("VENDEDOR", "first"), Meta=("_META", "sum"))
+    )
+    roster_keys = roster["_ROSTER_KEY"].tolist()
+    roster_key_set = set(roster_keys)
 
-    out = actual.merge(goals, on="_SELLER_KEY", how="outer").merge(actual_names, on="_SELLER_KEY", how="left")
-    if not goal_names.empty:
-        out = out.merge(goal_names, on="_SELLER_KEY", how="left")
-        out["Vendedor"] = out["Vendedor"].where(out["Vendedor"].notna(), out["Vendedor Meta"])
-        out = out.drop(columns=["Vendedor Meta"])
-    out[["Faturamento", "Meta"]] = out[["Faturamento", "Meta"]].fillna(0)
-    out["Vendedor"] = out["Vendedor"].fillna(out["_SELLER_KEY"].str.title())
-    # Exibe somente quem teve participação efetiva na linha no período.
-    # Vendedores presentes apenas na meta, mas sem faturamento, não aparecem no ranking.
+    seller_col = optional_col(fbase, ["VENDEDOR / REPRESENTANTE", "VENDEDOR"])
+    if not seller_col or fbase.empty:
+        out = roster.copy()
+        out["Faturamento"] = 0.0
+        unmatched_total = 0.0
+    else:
+        fbase["_ACTUAL_SELLER_KEY"] = fbase[seller_col].map(seller_key)
+        actual = (
+            fbase.groupby("_ACTUAL_SELLER_KEY", as_index=False)
+            .agg(Faturamento=("_VALOR", "sum"), Nome_Faturamento=(seller_col, "first"))
+        )
+
+        def roster_match(actual_key: str) -> tuple[str | None, str]:
+            if not actual_key:
+                return None, "Sem nome"
+            if actual_key in roster_key_set:
+                return actual_key, "Nome exato"
+
+            actual_tokens = set(actual_key.split())
+            # Ex.: CRISTIANE CRUZ -> CRISTIANE OLIVEIRA PINHO DA CRUZ
+            contained = []
+            for candidate in roster_keys:
+                candidate_tokens = set(candidate.split())
+                if len(candidate_tokens) >= 2 and candidate_tokens.issubset(actual_tokens):
+                    contained.append(candidate)
+                elif len(actual_tokens) >= 2 and actual_tokens.issubset(candidate_tokens):
+                    contained.append(candidate)
+            if contained:
+                contained = sorted(
+                    contained,
+                    key=lambda candidate: (len(set(candidate.split())), token_similarity(actual_key, candidate)),
+                    reverse=True,
+                )
+                return contained[0], "Nome contido"
+
+            matched, score = best_match(actual_key, roster_keys, cutoff=90.0)
+            if matched:
+                return matched, f"Similaridade {score:.0f}%"
+            return None, "Sem correspondência"
+
+        matched = actual["_ACTUAL_SELLER_KEY"].map(roster_match)
+        actual["_ROSTER_KEY"] = matched.map(lambda item: item[0])
+        actual["_CRITERIO_VENDEDOR"] = matched.map(lambda item: item[1])
+
+        unmatched_total = float(actual.loc[actual["_ROSTER_KEY"].isna(), "Faturamento"].sum())
+        actual_mapped = (
+            actual[actual["_ROSTER_KEY"].notna()]
+            .groupby("_ROSTER_KEY", as_index=False)["Faturamento"].sum()
+        )
+        out = roster.merge(actual_mapped, on="_ROSTER_KEY", how="left")
+        out["Faturamento"] = out["Faturamento"].fillna(0.0)
+
+    out["Meta"] = out["Meta"].fillna(0.0)
+    # Mantém a diretriz visual: integrantes sem participação no período não aparecem.
     out = out[out["Faturamento"] > 0].copy()
     out["Desvio"] = out["Faturamento"] - out["Meta"]
-    out["Atingimento"] = np.where(out["Meta"] != 0, out["Faturamento"] / out["Meta"], 0)
-    out = out[out["Atingimento"] > 0].copy()
+    out["Atingimento"] = np.where(out["Meta"] > 0, out["Faturamento"] / out["Meta"], 0.0)
     out["Status"] = np.select(
-        [out["Atingimento"] >= 1, out["Atingimento"] >= .9],
-        ["Meta atingida", "Próximo da meta"],
+        [out["Meta"] <= 0, out["Atingimento"] >= 1, out["Atingimento"] >= .9],
+        ["Meta não cadastrada", "Meta atingida", "Próximo da meta"],
         default="Abaixo da meta",
     )
-    return out.sort_values("Faturamento", ascending=False).reset_index(drop=True)
+
+    out = out.sort_values("Faturamento", ascending=False).reset_index(drop=True)
+    out.attrs["unmatched_total"] = float(unmatched_total)
+    out.attrs["matched_total"] = float(out["Faturamento"].sum()) if not out.empty else 0.0
+    out.attrs["source"] = "Equipe definida pela aba Metas"
+    return out
 
 
 def line_cash_monthly(
@@ -2550,7 +2588,7 @@ def build_business_performance_pdf(
     story.extend(section("Notas metodológicas", "Critérios usados na elaboração do relatório."))
     notes = [
         ["Regime de análise", "Os indicadores financeiros principais são gerenciais em regime de caixa."],
-        ["Linhas de negócio", "Receitas, despesas, margens e resultados diretos são determinados exclusivamente pela coluna Centro de Custos. O Centro de Custos Rateado aparece apenas como informação de contribuição às despesas gerais e não altera os cálculos."],
+        ["Linhas de negócio", "Receitas, despesas, margens e resultados diretos são determinados exclusivamente pela coluna Centro de Custos. A coluna de rateio não compõe nem é exibida nos indicadores do painel."],
         ["Faturamento e metas", "São indicadores comerciais por competência. O faturamento usa a coluna MÊS da BASE BI e a DT Emissão permanece como referência de auditoria."],
         ["Inadimplência", "O saldo é obtido do relatório ativo do CRM de cobrança, conforme o perfil e a linha atribuídos."],
         ["Margem de contribuição de caixa", "Receitas operacionais recebidas menos saídas variáveis pagas, dividido pelas receitas operacionais recebidas."],
@@ -2576,7 +2614,6 @@ def build_business_performance_print_html(
     receitas: pd.DataFrame,
     despesas: pd.DataFrame,
     custos: pd.DataFrame,
-    rateio: pd.DataFrame,
     performance: pd.DataFrame,
     inad: pd.DataFrame | None,
     company_monthly: pd.DataFrame,
@@ -2805,20 +2842,12 @@ def build_business_performance_print_html(
     body.append(section("Produtos", "".join(product_parts) if product_parts else "<div class='empty'>Sem dados de produtos.</div>"))
 
     cc = period_filter(custos, start_month, end_month).copy()
-    rateio_print = period_filter(rateio, start_month, end_month).copy() if isinstance(rateio, pd.DataFrame) and not rateio.empty else pd.DataFrame()
     if scope_choice != "CONSOLIDADO":
         cc = cc[cc["_CC_N"] == scope_choice].copy()
-        if not rateio_print.empty:
-            rateio_print = rateio_print[rateio_print["_LINHA_RATEIO"] == scope_choice].copy()
-    rateio_print_total = float(rateio_print["_VALOR"].sum()) if not rateio_print.empty else 0.0
     cc["Movimento"] = np.where(cc["_EMPRESA_N"] == "RECEITA", "Receita", "Despesa")
     cc["Classificação"] = np.where(cc["_GRUPO_N"].str.contains("NAO OPERACIONAIS", na=False), "Não operacional", "Operacional")
     cc["Departamento"] = cc["CENTRO DE CUSTOS"].fillna("Não informado").astype(str).str.strip()
-    cc_parts = [
-        f"<div class='rateio-print'><div><b>{'Despesas gerais distribuídas às linhas' if scope_choice == 'CONSOLIDADO' else 'Contribuição às despesas gerais'}</b>"
-        f"<span>Departamentos gerais distribuídos pelo Centro de Custos Rateado · informativo, sem alterar o resultado direto</span></div>"
-        f"<strong>{brl(rateio_print_total)}</strong></div>"
-    ]
+    cc_parts = []
     if not cc.empty:
         total_rev = float(cc.loc[cc["Movimento"] == "Receita", "_VALOR"].sum())
         total_exp = float(cc.loc[cc["Movimento"] == "Despesa", "_VALOR"].sum())
@@ -2868,10 +2897,6 @@ def build_business_performance_print_html(
     .metric-label{{font-size:9px;font-weight:900;letter-spacing:.055em;text-transform:uppercase;color:#667085}}
     .metric-value{{font-size:18px;font-weight:950;color:#071B33;margin-top:8px;white-space:nowrap}}
     .metric-note{{font-size:9px;color:#667085;margin-top:9px;line-height:1.3}}
-    .rateio-print{{display:flex;align-items:center;justify-content:space-between;gap:18px;border:1px solid #C8DDED;border-left:5px solid {CYAN};background:linear-gradient(120deg,#EAF3FA,#F8FBFE);border-radius:14px;padding:13px 15px;margin:0 0 13px;break-inside:avoid}}
-    .rateio-print b{{display:block;color:#071B33;font-size:12px;text-transform:uppercase;letter-spacing:.04em}}
-    .rateio-print span{{display:block;color:#52677C;font-size:10px;margin-top:4px}}
-    .rateio-print strong{{font-size:20px;color:#071B33;white-space:nowrap}}
     .two-col{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
     .chart-card,.table-card{{border:1px solid var(--border);border-radius:16px;padding:8px;background:white;margin:10px 0;break-inside:avoid}}
     h3{{font-size:15px;color:#071B33;margin:15px 0 8px}}
@@ -3100,20 +3125,6 @@ commercial_totals = commercial_performance_totals(commercial_monthly, metas_g, s
 lines_table = line_summary(fat, metas_g, receitas, custos, start_month, end_month, inad)
 fat_scope, rec_scope, cost_scope, inad_scope = scoped_data(scope_choice, fat, receitas, custos, inad, start_month, end_month)
 
-rateio_period = period_filter(rateio, start_month, end_month) if isinstance(rateio, pd.DataFrame) and not rateio.empty else pd.DataFrame()
-if not rateio_period.empty:
-    rateio_breakdown = {
-        line: float(rateio_period.loc[rateio_period["_LINHA_RATEIO"] == line, "_VALOR"].sum())
-        for line in LINES
-    }
-else:
-    rateio_breakdown = {line: 0.0 for line in LINES}
-rateio_total = (
-    float(rateio_period["_VALOR"].sum())
-    if scope_choice == "CONSOLIDADO" and not rateio_period.empty
-    else float(rateio_breakdown.get(scope_choice, 0.0))
-)
-
 
 # =========================================================
 # RELATÓRIO VISUAL PARA IMPRESSÃO
@@ -3124,7 +3135,7 @@ if page == "Relatório para impressão":
     print_html = build_business_performance_print_html(
         scope_choice=scope_choice, user=user, start_month=start_month, end_month=end_month,
         fat=fat, metas=metas, metas_g=metas_g, receitas=receitas, despesas=despesas,
-        custos=custos, rateio=rateio, performance=performance, inad=inad,
+        custos=custos, performance=performance, inad=inad,
         company_monthly=company_monthly, company_totals=company_totals,
         line_monthly=line_monthly, line_totals=line_totals,
         commercial_monthly=commercial_monthly, commercial_totals=commercial_totals,
@@ -3271,8 +3282,6 @@ elif page == "Dashboard":
             card("Conversão em caixa", pct(t["Conversão em Caixa"]), "Receita recebida sobre faturamento", TEAL)
         with k8:
             card("Inadimplência", brl(overdue) if inad is not None else "Base não carregada", "Saldo vencido da linha", RED if overdue > 0 else BLUE)
-
-        rateio_info(rateio_total, scope_choice)
 
         c1, c2 = st.columns([1.18, 1])
         with c1:
@@ -3498,12 +3507,22 @@ elif page == "Desempenho & metas":
             score_view[col] = score_view[col].map(pct)
         clean_table(score_view, height=255)
 
-    section_header("Desempenho da equipe", "Faturamento individual frente à meta")
+    section_header(
+        "Desempenho da equipe",
+        "Equipe oficial da aba Metas · faturamento utilizado somente como realizado",
+    )
     seller_perf = seller_performance(fat, metas, start_month, end_month, scope_choice)
+    seller_unmatched_total = float(seller_perf.attrs.get("unmatched_total", 0.0))
+    if is_controller and seller_unmatched_total > 0:
+        st.warning(
+            f"{brl(seller_unmatched_total)} do faturamento do período não encontrou um vendedor/representante "
+            "correspondente na aba Metas. O valor permanece no total da linha, mas não foi atribuído "
+            "automaticamente a nenhum integrante."
+        )
     sf1, sf2, sf3 = st.columns([1.4, 1, .7])
     seller_search = sf1.text_input("Buscar vendedor ou representante", key="seller_performance_search")
     seller_status = sf2.multiselect(
-        "Status", ["Meta atingida", "Próximo da meta", "Abaixo da meta"], key="seller_performance_status"
+        "Status", ["Meta atingida", "Próximo da meta", "Abaixo da meta", "Meta não cadastrada"], key="seller_performance_status"
     )
     seller_top = sf3.selectbox("Exibir", [10, 15, 20, 30], index=1, key="seller_performance_top")
     if seller_search:
@@ -3513,7 +3532,7 @@ elif page == "Desempenho & metas":
     seller_perf = seller_perf.head(seller_top)
 
     if seller_perf.empty:
-        st.info("Nenhum vendedor encontrado para os filtros selecionados.")
+        st.info("Nenhum integrante da aba Metas com faturamento foi encontrado para os filtros selecionados.")
     else:
         seller_plot = seller_perf.sort_values("Atingimento")
         seller_plot["Nome"] = seller_plot["Vendedor"].map(lambda x: short_label(x, 34))
@@ -3867,7 +3886,7 @@ elif page == "Produtos":
 # VALIDAÇÃO DOS DADOS — SOMENTE CONTROLADORIA
 # =========================================================
 elif page == "Validação dos dados" and can_validate:
-    section_header("Validação dos dados", "Conciliação técnica", "Faturamento, linhas, datas e rateio sem alterar os indicadores")
+    section_header("Validação dos dados", "Conciliação técnica", "Faturamento, linhas, datas e cruzamentos sem alterar os indicadores")
 
     validation, validation_lines, validation_managers, validation_monthly = billing_reconciliation(
         fat, start_month, end_month
@@ -3919,8 +3938,7 @@ elif page == "Validação dos dados" and can_validate:
     clean_table(financial_view, height=210)
     st.caption(
         "A diferença entre os resumos e o Centro de Custos é exibida para controle da origem. "
-        "Ela não é compensada automaticamente pelo app. Despesas gerais ficam fora do resultado direto das linhas "
-        "e aparecem separadamente no informativo de rateio."
+        "Ela não é compensada automaticamente pelo app, e o resultado das linhas permanece baseado no Centro de Custos direto."
     )
 
     m1, m2, m3 = st.columns(3)
@@ -3946,36 +3964,12 @@ elif page == "Validação dos dados" and can_validate:
         f"Linhas sem competência: {int(billing_audit.get('rows_without_month', 0))}."
     )
 
-    section_header("Validação do Centro de Custos Rateado", badge=rev_name)
-    r1, r2, r3 = st.columns(3)
-    with r1: card("Coluna reconhecida", str(rateio_meta.get("column", "Não localizada")), "Nome identificado na REV2026", NAVY)
-    with r2: card("Lançamentos gerais rateados", f"{int(rateio_meta.get('rows', len(rateio))):,}".replace(",", "."), "Despesas gerais distribuídas às quatro linhas", CYAN)
-    with r3: card("Valor geral distribuído", brl(float(rateio_meta.get("total", rateio["_VALOR"].sum() if not rateio.empty else 0))), "Indicador informativo; não altera resultado direto", BLUE)
-
-    rateio_validation = period_filter(rateio, start_month, end_month) if isinstance(rateio, pd.DataFrame) and not rateio.empty else pd.DataFrame()
-    if rateio_validation.empty:
-        st.warning(
-            "Nenhum rateio foi reconhecido no período. Confira na REV2026 se a coluna possui uma das identificações "
-            "Centro de Custos Rateado, Centro de Custos Rateio ou Centro de Custos Rateao."
-        )
-    else:
-        rateio_table = (
-            rateio_validation.groupby("_LINHA_RATEIO", as_index=False)["_VALOR"].sum()
-            .rename(columns={"_LINHA_RATEIO": "Código", "_VALOR": "Valor"})
-        )
-        rateio_table["Linha"] = rateio_table["Código"].map(line_label)
-        rateio_table = rateio_table[["Linha", "Valor"]].sort_values("Valor", ascending=False)
-        rateio_view = rateio_table.copy()
-        rateio_view["Valor"] = rateio_view["Valor"].map(brl)
-        clean_table(rateio_view, height=240)
 
 # =========================================================
 # CENTRO DE CUSTOS
 # =========================================================
 elif page == "Centro de custos":
     section_header("Centro de custos", badge=scope_text)
-    rateio_info(rateio_total, scope_choice, rateio_breakdown if scope_choice == "CONSOLIDADO" else None)
-
     cc_base = period_filter(custos, start_month, end_month).copy()
     cc_base["Movimento"] = np.where(cc_base["_EMPRESA_N"] == "RECEITA", "Receita", "Despesa")
     cc_base["Classificação"] = np.where(
@@ -3985,7 +3979,7 @@ elif page == "Centro de custos":
     cc_base["Departamento"] = cc_base["CENTRO DE CUSTOS"].astype(str).str.strip()
 
     # Para gestores, o departamento é sempre o centro de custo direto da própria linha.
-    # O Centro de Custos Rateado é exibido apenas no informativo acima e não participa dos cálculos desta página.
+    # A coluna de rateio não participa dos cálculos nem da exibição desta página.
     if scope_choice != "CONSOLIDADO":
         cc_base = cc_base[cc_base["_CC_N"] == scope_choice].copy()
 
