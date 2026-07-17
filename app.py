@@ -822,9 +822,13 @@ def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
         mcol = require_col(df, ["MÊS"], label)
         vcol = require_col(df, ["META MENSAL"], label)
         annual_col = optional_col(df, ["METAL ANUAL", "META ANUAL"])
+        realized_col = optional_col(df, ["ATINGIMENTO", "REALIZADO", "FATURAMENTO REALIZADO"])
         df["_MES"] = pd.to_datetime(df[mcol], errors="coerce").dt.to_period("M")
         df["_META"] = to_number(df[vcol])
         df["_META_ANUAL"] = to_number(df[annual_col]) if annual_col else 0.0
+        # Na BASE BI, a coluna ATINGIMENTO guarda o valor realizado mensal,
+        # enquanto a coluna % contém o percentual de atingimento.
+        df["_REALIZADO_META"] = to_number(df[realized_col]) if realized_col else 0.0
         for c in ["GERENTE", "VENDEDOR"]:
             if c in df.columns:
                 df[c] = df[c].fillna("Não informado").astype(str).str.strip()
@@ -1809,20 +1813,15 @@ def seller_performance(
     fat: pd.DataFrame, metas: pd.DataFrame, start: pd.Period, end: pd.Period,
     line: str = "CONSOLIDADO",
 ) -> pd.DataFrame:
-    """Apura a equipe pela aba Metas e usa o faturamento somente como realizado.
+    """Apura equipe, meta e realizado diretamente pela aba Metas.
 
-    A aba Metas é a fonte oficial para definir quais vendedores/representantes
-    pertencem à equipe de cada gerente. O Banco de Dados de Faturamento continua
-    sendo utilizado apenas para somar o valor realizado de cada integrante.
+    A aba Metas é a fonte oficial tanto para a composição da equipe quanto para
+    o valor realizado individual. Na estrutura atual da BASE BI, a coluna
+    ATINGIMENTO contém o realizado mensal e a coluna % contém o percentual.
 
-    O cruzamento aceita:
-    - nome idêntico após normalização;
-    - nome resumido da meta contido no nome completo do faturamento;
-    - aproximação textual forte para pequenas diferenças cadastrais.
-
-    Faturamentos que não encontram integrante na aba Metas não são atribuídos
-    automaticamente a outra pessoa. Permanecem no total da linha e são informados
-    à Controladoria como valor sem vínculo com a equipe da meta.
+    O Banco de Dados de Faturamento permanece como fonte do faturamento total
+    da empresa e das linhas, mas não é usado para redistribuir o resultado entre
+    vendedores, evitando zerar nomes que possuem cadastros diferentes nas bases.
     """
     fbase = period_filter(fat, start, end).copy()
     mbase = period_filter(metas, start, end).copy()
@@ -1835,75 +1834,27 @@ def seller_performance(
 
     if mbase.empty or "VENDEDOR" not in mbase.columns:
         empty = pd.DataFrame(columns=["Vendedor", "Faturamento", "Meta", "Desvio", "Atingimento", "Status"])
-        empty.attrs["unmatched_total"] = float(fbase["_VALOR"].sum()) if "_VALOR" in fbase.columns else 0.0
-        empty.attrs["matched_total"] = 0.0
+        empty.attrs["billing_total"] = float(fbase["_VALOR"].sum()) if "_VALOR" in fbase.columns else 0.0
+        empty.attrs["meta_actual_total"] = 0.0
+        empty.attrs["reconciliation_difference"] = empty.attrs["billing_total"]
         return empty
 
-    # A equipe e os nomes exibidos vêm exclusivamente da aba Metas.
     mbase["_ROSTER_KEY"] = mbase["VENDEDOR"].map(seller_key)
     mbase = mbase[~mbase["_ROSTER_KEY"].isin(["", "NAO INFORMADO"])].copy()
-    roster = (
+    if "_REALIZADO_META" not in mbase.columns:
+        mbase["_REALIZADO_META"] = 0.0
+
+    out = (
         mbase.groupby("_ROSTER_KEY", as_index=False)
-        .agg(Vendedor=("VENDEDOR", "first"), Meta=("_META", "sum"))
+        .agg(
+            Vendedor=("VENDEDOR", "first"),
+            Faturamento=("_REALIZADO_META", "sum"),
+            Meta=("_META", "sum"),
+        )
     )
-    roster_keys = roster["_ROSTER_KEY"].tolist()
-    roster_key_set = set(roster_keys)
 
-    seller_col = optional_col(fbase, ["VENDEDOR / REPRESENTANTE", "VENDEDOR"])
-    if not seller_col or fbase.empty:
-        out = roster.copy()
-        out["Faturamento"] = 0.0
-        unmatched_total = 0.0
-    else:
-        fbase["_ACTUAL_SELLER_KEY"] = fbase[seller_col].map(seller_key)
-        actual = (
-            fbase.groupby("_ACTUAL_SELLER_KEY", as_index=False)
-            .agg(Faturamento=("_VALOR", "sum"), Nome_Faturamento=(seller_col, "first"))
-        )
-
-        def roster_match(actual_key: str) -> tuple[str | None, str]:
-            if not actual_key:
-                return None, "Sem nome"
-            if actual_key in roster_key_set:
-                return actual_key, "Nome exato"
-
-            actual_tokens = set(actual_key.split())
-            # Ex.: CRISTIANE CRUZ -> CRISTIANE OLIVEIRA PINHO DA CRUZ
-            contained = []
-            for candidate in roster_keys:
-                candidate_tokens = set(candidate.split())
-                if len(candidate_tokens) >= 2 and candidate_tokens.issubset(actual_tokens):
-                    contained.append(candidate)
-                elif len(actual_tokens) >= 2 and actual_tokens.issubset(candidate_tokens):
-                    contained.append(candidate)
-            if contained:
-                contained = sorted(
-                    contained,
-                    key=lambda candidate: (len(set(candidate.split())), token_similarity(actual_key, candidate)),
-                    reverse=True,
-                )
-                return contained[0], "Nome contido"
-
-            matched, score = best_match(actual_key, roster_keys, cutoff=90.0)
-            if matched:
-                return matched, f"Similaridade {score:.0f}%"
-            return None, "Sem correspondência"
-
-        matched = actual["_ACTUAL_SELLER_KEY"].map(roster_match)
-        actual["_ROSTER_KEY"] = matched.map(lambda item: item[0])
-        actual["_CRITERIO_VENDEDOR"] = matched.map(lambda item: item[1])
-
-        unmatched_total = float(actual.loc[actual["_ROSTER_KEY"].isna(), "Faturamento"].sum())
-        actual_mapped = (
-            actual[actual["_ROSTER_KEY"].notna()]
-            .groupby("_ROSTER_KEY", as_index=False)["Faturamento"].sum()
-        )
-        out = roster.merge(actual_mapped, on="_ROSTER_KEY", how="left")
-        out["Faturamento"] = out["Faturamento"].fillna(0.0)
-
+    out["Faturamento"] = out["Faturamento"].fillna(0.0)
     out["Meta"] = out["Meta"].fillna(0.0)
-    # A aba Metas define a equipe oficial. Todos os integrantes cadastrados aparecem,
-    # inclusive quando ainda não possuem faturamento no período selecionado.
     out["Desvio"] = out["Faturamento"] - out["Meta"]
     out["Atingimento"] = np.where(out["Meta"] > 0, out["Faturamento"] / out["Meta"], 0.0)
     out["Status"] = np.select(
@@ -1913,9 +1864,12 @@ def seller_performance(
     )
 
     out = out.sort_values("Faturamento", ascending=False).reset_index(drop=True)
-    out.attrs["unmatched_total"] = float(unmatched_total)
-    out.attrs["matched_total"] = float(out["Faturamento"].sum()) if not out.empty else 0.0
-    out.attrs["source"] = "Equipe definida pela aba Metas"
+    billing_total = float(fbase["_VALOR"].sum()) if "_VALOR" in fbase.columns else 0.0
+    meta_actual_total = float(out["Faturamento"].sum()) if not out.empty else 0.0
+    out.attrs["billing_total"] = billing_total
+    out.attrs["meta_actual_total"] = meta_actual_total
+    out.attrs["reconciliation_difference"] = billing_total - meta_actual_total
+    out.attrs["source"] = "Equipe, meta e realizado definidos pela aba Metas"
     return out
 
 
@@ -3565,15 +3519,17 @@ elif page == "Desempenho & metas":
 
     section_header(
         "Desempenho da equipe",
-        "Equipe oficial da aba Metas · faturamento utilizado somente como realizado",
+        "Equipe, metas e resultados individuais oficiais da aba Metas",
     )
     seller_perf = seller_performance(fat, metas, start_month, end_month, scope_choice)
-    seller_unmatched_total = float(seller_perf.attrs.get("unmatched_total", 0.0))
-    if is_controladoria and seller_unmatched_total > 0:
-        st.warning(
-            f"{brl(seller_unmatched_total)} do faturamento do período não encontrou um vendedor/representante "
-            "correspondente na aba Metas. O valor permanece no total da linha, mas não foi atribuído "
-            "automaticamente a nenhum integrante."
+    seller_reconciliation = float(seller_perf.attrs.get("reconciliation_difference", 0.0))
+    seller_billing_total = float(seller_perf.attrs.get("billing_total", 0.0))
+    seller_meta_actual = float(seller_perf.attrs.get("meta_actual_total", 0.0))
+    if is_controladoria and abs(seller_reconciliation) > 0.01:
+        st.info(
+            "Conciliação das fontes: o faturamento total da linha vem do Banco de Dados de Faturamento "
+            f"({brl(seller_billing_total)}), enquanto os resultados individuais vêm da coluna ATINGIMENTO "
+            f"da aba Metas ({brl(seller_meta_actual)}). Diferença entre as fontes: {brl(seller_reconciliation)}."
         )
     sf1, sf2, sf3 = st.columns([1.4, 1, .7])
     seller_search = sf1.text_input("Buscar vendedor ou representante", key="seller_performance_search")
