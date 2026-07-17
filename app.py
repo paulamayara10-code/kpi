@@ -15,6 +15,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 from openpyxl import load_workbook
 
 
@@ -2134,6 +2135,329 @@ def build_business_performance_pdf(
     return output.getvalue()
 
 
+
+
+def build_business_performance_print_html(
+    *,
+    scope_choice: str,
+    user: dict[str, str],
+    start_month: pd.Period,
+    end_month: pd.Period,
+    fat: pd.DataFrame,
+    metas: pd.DataFrame,
+    metas_g: pd.DataFrame,
+    receitas: pd.DataFrame,
+    despesas: pd.DataFrame,
+    custos: pd.DataFrame,
+    performance: pd.DataFrame,
+    inad: pd.DataFrame | None,
+    company_monthly: pd.DataFrame,
+    company_totals: dict[str, float],
+    line_monthly: pd.DataFrame | None,
+    line_totals: dict[str, float] | None,
+    commercial_monthly: pd.DataFrame,
+    commercial_totals: dict[str, float],
+    lines_table: pd.DataFrame,
+    fat_scope: pd.DataFrame,
+    rec_scope: pd.DataFrame,
+    cost_scope: pd.DataFrame,
+    inad_scope: pd.DataFrame | None,
+) -> str:
+    """Relatório HTML visual, com a mesma identidade do app e impressão pelo navegador."""
+    from datetime import datetime
+
+    plotly_loaded = False
+
+    def esc(value: object) -> str:
+        return html.escape("" if value is None else str(value))
+
+    def plot_html(fig: go.Figure, height: int = 320, legend_bottom: bool = True) -> str:
+        nonlocal plotly_loaded
+        fig = plot_layout(fig, height, legend_bottom)
+        fig.update_layout(
+            paper_bgcolor="#FFFFFF", plot_bgcolor="#FFFFFF",
+            margin=dict(l=18, r=45, t=62, b=54 if legend_bottom else 30),
+            font=dict(family="Arial, sans-serif", color="#344054", size=11),
+        )
+        include_js = "inline" if not plotly_loaded else False
+        plotly_loaded = True
+        return fig.to_html(
+            full_html=False,
+            include_plotlyjs=include_js,
+            config={"displayModeBar": False, "responsive": True, "staticPlot": True},
+            default_height=f"{height}px",
+        )
+
+    def metric_cards(items: list[tuple[str, str, str, str]]) -> str:
+        cards = []
+        for label, value, note, tone in items:
+            cards.append(
+                f"<div class='metric-card' style='--tone:{tone}'>"
+                f"<div class='metric-label'>{esc(label)}</div>"
+                f"<div class='metric-value'>{esc(value)}</div>"
+                f"<div class='metric-note'>{esc(note)}</div></div>"
+            )
+        return "<div class='metric-grid'>" + "".join(cards) + "</div>"
+
+    def table_html(df: pd.DataFrame, max_rows: int = 15) -> str:
+        if df is None or df.empty:
+            return "<div class='empty'>Sem registros para o período selecionado.</div>"
+        view = df.head(max_rows).copy().where(lambda x: pd.notna(x), "")
+        return "<div class='table-card'>" + view.to_html(index=False, border=0, classes="report-table", escape=True) + "</div>"
+
+    def section(title: str, content: str, first: bool = False) -> str:
+        cls = "report-section first" if first else "report-section"
+        return f"<section class='{cls}'><div class='section-title'>{esc(title)}</div>{content}</section>"
+
+    period_text = f"{month_label(start_month)} a {month_label(end_month)}"
+    scope_text = line_label(scope_choice)
+    generated = datetime.now().strftime("%d/%m/%Y %H:%M")
+    overdue_total = float(inad_scope["_VALOR_VENCIDO"].sum()) if inad_scope is not None and not inad_scope.empty else 0.0
+
+    body: list[str] = []
+    hero = f"""
+    <div class='report-hero'>
+      <div><div class='brand'>FIRST INTELLIGENCE</div><h1>Business Performance</h1>
+      <p>{esc(scope_text)} · {esc(period_text)} · Gerado em {generated}</p></div>
+      <div class='hero-badge'>{esc(user.get('nome', 'Usuário'))}</div>
+    </div>
+    """
+
+    if scope_choice == "CONSOLIDADO":
+        cover_metrics = [
+            ("Receitas operacionais recebidas", brl(company_totals.get("Receitas Operacionais", 0)), "Entradas realizadas da operação", BLUE),
+            ("Saídas operacionais pagas", brl(company_totals.get("Saídas Operacionais", 0)), "Pagamentos operacionais", RED),
+            ("Resultado operacional de caixa", brl(company_totals.get("Resultado Operacional de Caixa", 0)), "Receitas menos saídas", BLUE),
+            ("Margem operacional de caixa", pct(company_totals.get("Margem de Caixa", 0)), "Resultado sobre receitas", NAVY),
+            ("Faturamento", brl(commercial_totals.get("Faturamento", 0)), "Vendas emitidas", BLUE),
+            ("Atingimento da meta", pct(commercial_totals.get("Atingimento", 0)), "Realizado sobre meta", NAVY),
+            ("EBITDA gerencial de caixa", brl(company_totals.get("EBITDA Gerencial de Caixa", 0)), "Antes de IRPJ e CSLL pagos", BLUE),
+            ("Inadimplência", brl(overdue_total), "Saldo vencido no CRM", RED),
+        ]
+        monthly = company_monthly
+        rev_col, exp_col, res_col = "Receitas Operacionais", "Saídas Operacionais", "Resultado Operacional de Caixa"
+    else:
+        lt = line_totals or {}
+        cover_metrics = [
+            ("Receitas operacionais", brl(lt.get("Receitas Recebidas", 0)), "Recebimentos diretos", BLUE),
+            ("Despesas operacionais", brl(lt.get("Custos Diretos Pagos", 0)), "Pagamentos diretos", RED),
+            ("Resultado direto de caixa", brl(lt.get("Resultado Direto de Caixa", 0)), "Receitas menos despesas", BLUE if lt.get("Resultado Direto de Caixa", 0) >= 0 else RED),
+            ("Margem direta de caixa", pct(lt.get("Margem Direta de Caixa", 0)), "Resultado sobre receitas", NAVY),
+            ("Faturamento", brl(commercial_totals.get("Faturamento", 0)), "Vendas emitidas", BLUE),
+            ("Atingimento da meta", pct(commercial_totals.get("Atingimento", 0)), "Realizado sobre meta", NAVY),
+            ("Conversão em caixa", pct(lt.get("Conversão em Caixa", 0)), "Recebido sobre faturado", BLUE),
+            ("Inadimplência", brl(overdue_total), "Saldo vencido da linha", RED),
+        ]
+        monthly = line_monthly if line_monthly is not None else pd.DataFrame()
+        rev_col, exp_col, res_col = "Receitas Recebidas", "Custos Diretos Pagos", "Resultado Direto de Caixa"
+
+    dash_parts = [hero, metric_cards(cover_metrics)]
+    if monthly is not None and not monthly.empty:
+        fig = go.Figure()
+        fig.add_bar(x=monthly["Mês Texto"], y=monthly[rev_col], name="Receitas", marker_color=BLUE,
+                    text=monthly[rev_col].map(compact_money), textposition="outside", cliponaxis=False)
+        fig.add_bar(x=monthly["Mês Texto"], y=monthly[exp_col], name="Despesas", marker_color=RED,
+                    text=monthly[exp_col].map(compact_money), textposition="inside", insidetextanchor="end",
+                    textfont=dict(color=WHITE), cliponaxis=False)
+        fig.add_scatter(x=monthly["Mês Texto"], y=monthly[res_col], name="Resultado", mode="lines+markers",
+                        line=dict(color=NAVY, width=3), marker=dict(size=7))
+        add_point_labels(fig, monthly["Mês Texto"], monthly[res_col], monthly[res_col].map(compact_money), color=NAVY)
+        fig.update_layout(title="Movimento mensal de caixa", barmode="group")
+        hide_value_axis(fig, "y")
+        dash_parts.append("<div class='chart-card'>" + plot_html(fig, 330) + "</div>")
+
+    if scope_choice == "CONSOLIDADO" and not lines_table.empty:
+        f1 = line_result_lollipop(lines_table, "Resultado direto por linha")
+        f2 = line_revenue_cost_dumbbell(lines_table, "Receitas x despesas por linha")
+        dash_parts.append("<div class='two-col'><div class='chart-card'>" + plot_html(f1, 310, False) + "</div><div class='chart-card'>" + plot_html(f2, 310) + "</div></div>")
+    body.append(section("Visão executiva", "".join(dash_parts), True))
+
+    perf_metrics = metric_cards([
+        ("Faturamento realizado", brl(commercial_totals.get("Faturamento", 0)), "Período selecionado", BLUE),
+        ("Meta acumulada", brl(commercial_totals.get("Meta", 0)), "Objetivo do período", NAVY),
+        ("Atingimento", pct(commercial_totals.get("Atingimento", 0)), "Realizado sobre meta", BLUE),
+        ("Desvio", brl(commercial_totals.get("Desvio", 0)), "Realizado menos meta", BLUE if commercial_totals.get("Desvio", 0) >= 0 else RED),
+        ("Meta anual", brl(commercial_totals.get("Meta Anual", 0)), str(end_month.year), NAVY),
+        ("Projeção anual", brl(commercial_totals.get("Projeção Anual", 0)), "Ritmo atual anualizado", BLUE),
+        ("Atingimento projetado", pct(commercial_totals.get("Atingimento Projetado", 0)), "Projeção sobre meta anual", NAVY),
+        ("Média mensal", brl(commercial_totals.get("Média Mensal", 0)), "Faturamento médio", BLUE),
+    ])
+    perf_fig = go.Figure()
+    perf_fig.add_bar(x=commercial_monthly["Mês Texto"], y=commercial_monthly["Faturamento"], name="Faturamento", marker_color=BLUE,
+                     text=commercial_monthly["Faturamento"].map(compact_money), textposition="outside", cliponaxis=False)
+    perf_fig.add_scatter(x=commercial_monthly["Mês Texto"], y=commercial_monthly["Meta"], name="Meta", mode="lines+markers",
+                         line=dict(color=NAVY, width=3, dash="dot"), marker=dict(size=7))
+    add_point_labels(perf_fig, commercial_monthly["Mês Texto"], commercial_monthly["Meta"], commercial_monthly["Meta"].map(compact_money), color=NAVY)
+    perf_fig.update_layout(title="Faturamento realizado x meta")
+    hide_value_axis(perf_fig, "y")
+    sellers = seller_performance(fat, metas, start_month, end_month, scope_choice).head(15)
+    seller_view = sellers[["Vendedor", "Faturamento", "Meta", "Atingimento", "Status"]].copy() if not sellers.empty else sellers
+    if not seller_view.empty:
+        seller_view["Faturamento"] = seller_view["Faturamento"].map(brl)
+        seller_view["Meta"] = seller_view["Meta"].map(brl)
+        seller_view["Atingimento"] = seller_view["Atingimento"].map(pct)
+    body.append(section("Desempenho e metas", perf_metrics + "<div class='chart-card'>" + plot_html(perf_fig, 325) + "</div><h3>Desempenho da equipe</h3>" + table_html(seller_view, 15)))
+
+    receipt_parts = []
+    if scope_choice == "CONSOLIDADO":
+        rec_metrics = [
+            ("Recebimento previsto", brl(company_totals.get("Recebimento Previsto", 0)), "Carteira prevista", NAVY),
+            ("Recebimento realizado", brl(company_totals.get("Recebimento Realizado", 0)), "Entradas realizadas", BLUE),
+            ("Performance de recebimento", pct(company_totals.get("Performance de Recebimento", 0)), "Realizado sobre previsto", BLUE),
+            ("Inadimplência", brl(overdue_total), "Saldo vencido", RED),
+        ]
+        rfig = go.Figure()
+        rfig.add_bar(x=company_monthly["Mês Texto"], y=company_monthly["Recebimento Previsto"], name="Previsto", marker_color="#8AB8DC",
+                     text=company_monthly["Recebimento Previsto"].map(compact_money), textposition="outside", cliponaxis=False)
+        rfig.add_scatter(x=company_monthly["Mês Texto"], y=company_monthly["Recebimento Realizado"], name="Realizado", mode="lines+markers",
+                         line=dict(color=BLUE, width=3), marker=dict(size=7))
+        add_point_labels(rfig, company_monthly["Mês Texto"], company_monthly["Recebimento Realizado"], company_monthly["Recebimento Realizado"].map(compact_money), color=NAVY)
+        rfig.update_layout(title="Recebimento previsto x realizado")
+        hide_value_axis(rfig, "y")
+        receipt_parts.append(metric_cards(rec_metrics) + "<div class='chart-card'>" + plot_html(rfig, 315) + "</div>")
+    else:
+        lt = line_totals or {}
+        receipt_parts.append(metric_cards([
+            ("Receitas recebidas", brl(lt.get("Receitas Recebidas", 0)), "Entradas da linha", BLUE),
+            ("Faturamento", brl(commercial_totals.get("Faturamento", 0)), "Vendas emitidas", NAVY),
+            ("Conversão em caixa", pct(lt.get("Conversão em Caixa", 0)), "Recebido sobre faturado", BLUE),
+            ("Inadimplência", brl(overdue_total), "Saldo vencido", RED),
+        ]))
+    if inad_scope is not None and not inad_scope.empty:
+        aging_order = ["Até 30 dias", "31 a 60 dias", "61 a 90 dias", "Acima de 90 dias"]
+        aging = inad_scope.groupby("_FAIXA", observed=False)["_VALOR_VENCIDO"].sum().reindex(aging_order, fill_value=0).reset_index()
+        aging.columns = ["Faixa", "Saldo"]
+        af = px.bar(aging, x="Faixa", y="Saldo", title="Aging da inadimplência")
+        af.update_traces(marker_color=BLUE, text=aging["Saldo"].map(compact_money), textposition="outside", cliponaxis=False)
+        hide_value_axis(af, "y")
+        debt = inad_scope.groupby("_CLIENTE", as_index=False)["_VALOR_VENCIDO"].sum().sort_values("_VALOR_VENCIDO", ascending=False).head(15)
+        debt.columns = ["Cliente", "Saldo vencido"]
+        debt["Saldo vencido"] = debt["Saldo vencido"].map(brl)
+        receipt_parts.append("<div class='chart-card'>" + plot_html(af, 285, False) + "</div><h3>Maiores saldos vencidos</h3>" + table_html(debt, 15))
+    body.append(section("Recebimentos e inadimplência", "".join(receipt_parts)))
+
+    client_col = "NOME DO CLIENTE" if "NOME DO CLIENTE" in fat_scope.columns else optional_col(fat_scope, ["CLIENTE", "Cliente"])
+    client_parts = []
+    if client_col and not fat_scope.empty:
+        billed = fat_scope.groupby(client_col, as_index=False)["_VALOR"].sum().sort_values("_VALOR", ascending=False).head(15)
+        total_billed = float(fat_scope["_VALOR"].sum())
+        billed["Participação"] = np.where(total_billed != 0, billed["_VALOR"] / total_billed, 0)
+        billed.columns = ["Cliente", "Faturamento", "Participação"]
+        chart_data = billed.head(10).sort_values("Faturamento").copy()
+        chart_data["Nome"] = chart_data["Cliente"].map(lambda x: short_label(x, 35))
+        cf = px.bar(chart_data, x="Faturamento", y="Nome", orientation="h", title="Principais clientes por faturamento")
+        cf.update_traces(marker_color=BLUE, text=chart_data["Faturamento"].map(compact_money), textposition="outside", cliponaxis=False)
+        hide_value_axis(cf, "x")
+        billed["Faturamento"] = billed["Faturamento"].map(brl)
+        billed["Participação"] = billed["Participação"].map(pct)
+        client_parts.append("<div class='chart-card'>" + plot_html(cf, 330, False) + "</div>" + table_html(billed, 15))
+    body.append(section("Clientes", "".join(client_parts) if client_parts else "<div class='empty'>Sem dados de clientes.</div>"))
+
+    product_col = optional_col(fat_scope, ["PRODUTO", "DESCRIÇÃO", "LINHA DE PRODUTO", "ITEM"])
+    product_parts = []
+    if product_col and not fat_scope.empty:
+        qty_col = optional_col(fat_scope, ["QUANTIDADE", "QTD", "QTDE", "QTD FATURADA", "QUANTIDADE FATURADA"])
+        prod = fat_scope.copy()
+        prod["_PRODUTO_REL"] = prod[product_col].fillna("Não informado").astype(str).str.strip()
+        prod["_QTD_REL"] = to_number(prod[qty_col]) if qty_col else 1.0
+        prod.loc[prod["_QTD_REL"] <= 0, "_QTD_REL"] = 1.0
+        products = prod.groupby("_PRODUTO_REL", as_index=False).agg(Faturamento=("_VALOR", "sum"), Quantidade=("_QTD_REL", "sum"))
+        products["Preço médio"] = np.where(products["Quantidade"] != 0, products["Faturamento"] / products["Quantidade"], 0)
+        products = products.sort_values("Faturamento", ascending=False).head(20)
+        cp = products.head(10).sort_values("Faturamento").copy()
+        cp["Produto"] = cp["_PRODUTO_REL"].map(lambda x: short_label(x, 38))
+        pf = px.bar(cp, x="Faturamento", y="Produto", orientation="h", title="Produtos por faturamento")
+        pf.update_traces(marker_color=BLUE, text=cp["Faturamento"].map(compact_money), textposition="outside", cliponaxis=False)
+        hide_value_axis(pf, "x")
+        pv = products.rename(columns={"_PRODUTO_REL": "Produto"}).copy()
+        pv["Faturamento"] = pv["Faturamento"].map(brl)
+        pv["Quantidade"] = pv["Quantidade"].map(lambda v: f"{v:,.0f}".replace(",", "."))
+        pv["Preço médio"] = pv["Preço médio"].map(brl)
+        product_parts.append("<div class='chart-card'>" + plot_html(pf, 340, False) + "</div>" + table_html(pv, 20))
+    body.append(section("Produtos", "".join(product_parts) if product_parts else "<div class='empty'>Sem dados de produtos.</div>"))
+
+    cc = period_filter(custos, start_month, end_month).copy()
+    if scope_choice != "CONSOLIDADO":
+        cc = cc[cc["_CC_N"] == scope_choice].copy()
+    cc["Movimento"] = np.where(cc["_EMPRESA_N"] == "RECEITA", "Receita", "Despesa")
+    cc["Classificação"] = np.where(cc["_GRUPO_N"].str.contains("NAO OPERACIONAIS", na=False), "Não operacional", "Operacional")
+    cc["Departamento"] = cc["CENTRO DE CUSTOS"].fillna("Não informado").astype(str).str.strip()
+    cc_parts = []
+    if not cc.empty:
+        total_rev = float(cc.loc[cc["Movimento"] == "Receita", "_VALOR"].sum())
+        total_exp = float(cc.loc[cc["Movimento"] == "Despesa", "_VALOR"].sum())
+        cc_parts.append(metric_cards([
+            ("Receitas", brl(total_rev), "Movimentos de entrada", BLUE),
+            ("Despesas", brl(total_exp), "Movimentos de saída", RED),
+            ("Saldo", brl(total_rev-total_exp), "Receitas menos despesas", BLUE if total_rev-total_exp >= 0 else RED),
+            ("Centros de custos", f"{cc['Departamento'].nunique():,}".replace(",", "."), "Departamentos", NAVY),
+        ]))
+        dep = cc.groupby(["Departamento", "Movimento"], as_index=False)["_VALOR"].sum().pivot(index="Departamento", columns="Movimento", values="_VALOR").fillna(0).reset_index()
+        for col in ["Receita", "Despesa"]:
+            if col not in dep: dep[col] = 0.0
+        dep["Movimentação"] = dep["Receita"] + dep["Despesa"]
+        dep = dep.sort_values("Movimentação", ascending=False).head(15).sort_values("Movimentação")
+        dep["Nome"] = dep["Departamento"].map(lambda x: short_label(x, 30))
+        ccf = go.Figure()
+        ccf.add_bar(x=dep["Receita"], y=dep["Nome"], orientation="h", name="Receitas", marker_color=BLUE,
+                    text=[compact_money(v) if v > 0 else "" for v in dep["Receita"]], textposition="outside", cliponaxis=False)
+        ccf.add_bar(x=dep["Despesa"], y=dep["Nome"], orientation="h", name="Despesas", marker_color=RED,
+                    text=[compact_money(v) if v > 0 else "" for v in dep["Despesa"]], textposition="outside", cliponaxis=False)
+        ccf.update_layout(title="Receitas e despesas por departamento", barmode="group")
+        hide_value_axis(ccf, "x")
+        dep_view = dep[["Departamento", "Receita", "Despesa"]].copy()
+        dep_view["Saldo"] = dep_view["Receita"] - dep_view["Despesa"]
+        for col in ["Receita", "Despesa", "Saldo"]: dep_view[col] = dep_view[col].map(brl)
+        cc_parts.append("<div class='chart-card'>" + plot_html(ccf, 390) + "</div>" + table_html(dep_view.sort_values("Departamento"), 20))
+    body.append(section("Centro de custos", "".join(cc_parts) if cc_parts else "<div class='empty'>Sem movimentos no centro de custos.</div>"))
+
+    css = f"""
+    :root {{--navy:{NAVY};--blue:{BLUE};--red:{RED};--light:#F3F6FA;--border:#DCE6EF;}}
+    *{{box-sizing:border-box;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+    body{{margin:0;background:#EEF3F8;color:#24364B;font-family:Arial,sans-serif}}
+    .print-toolbar{{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#071B33;color:white;box-shadow:0 4px 16px rgba(7,27,51,.22)}}
+    .print-toolbar button{{border:0;border-radius:10px;padding:10px 18px;background:#1261A0;color:white;font-weight:800;cursor:pointer}}
+    .report{{max-width:1320px;margin:18px auto;padding:0 12px 30px}}
+    .report-section{{background:white;border:1px solid var(--border);border-radius:22px;padding:22px;margin:0 0 18px;box-shadow:0 14px 36px rgba(7,27,51,.07);break-before:page}}
+    .report-section.first{{break-before:auto}}
+    .report-hero{{display:flex;align-items:center;justify-content:space-between;gap:20px;background:linear-gradient(120deg,#071B33,#0E3762 58%,#1B5D97);color:white;border-radius:20px;padding:24px 28px;margin-bottom:16px}}
+    .brand{{font-size:11px;letter-spacing:.28em;font-weight:900;color:#B9D9F0}}
+    .report-hero h1{{font-size:30px;margin:7px 0 5px;letter-spacing:-.03em}}
+    .report-hero p{{margin:0;color:#DCEAF5;font-size:12px}}
+    .hero-badge{{border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.10);border-radius:999px;padding:8px 13px;font-size:12px;font-weight:800}}
+    .section-title{{font-size:20px;font-weight:900;color:#071B33;border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:14px}}
+    .metric-grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}}
+    .metric-card{{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:16px;padding:14px;background:linear-gradient(145deg,#fff,#F9FCFF);min-height:105px;break-inside:avoid}}
+    .metric-card:after{{content:'';position:absolute;width:58px;height:58px;border-radius:50%;right:-22px;top:-24px;background:var(--tone);opacity:.10}}
+    .metric-label{{font-size:9px;font-weight:900;letter-spacing:.055em;text-transform:uppercase;color:#667085}}
+    .metric-value{{font-size:18px;font-weight:950;color:#071B33;margin-top:8px;white-space:nowrap}}
+    .metric-note{{font-size:9px;color:#667085;margin-top:9px;line-height:1.3}}
+    .two-col{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
+    .chart-card,.table-card{{border:1px solid var(--border);border-radius:16px;padding:8px;background:white;margin:10px 0;break-inside:avoid}}
+    h3{{font-size:15px;color:#071B33;margin:15px 0 8px}}
+    .report-table{{width:100%;border-collapse:collapse;font-size:10px}}
+    .report-table th{{background:#0B2F55;color:white;text-align:left;padding:8px 9px}}
+    .report-table td{{padding:7px 9px;border-bottom:1px solid #E8EEF4}}
+    .report-table tr:nth-child(even) td{{background:#F6F9FC}}
+    .empty{{padding:20px;border:1px dashed #C7D7E5;border-radius:14px;color:#667085;text-align:center}}
+    @page{{size:A4 landscape;margin:9mm}}
+    @media print{{
+      body{{background:white}}
+      .print-toolbar{{display:none!important}}
+      .report{{max-width:none;margin:0;padding:0}}
+      .report-section{{box-shadow:none;border:0;border-radius:0;margin:0;padding:0;min-height:auto;break-before:page}}
+      .report-section.first{{break-before:auto}}
+      .report-hero{{border-radius:14px}}
+      .chart-card,.table-card,.metric-card,.two-col{{break-inside:avoid-page}}
+      .metric-grid{{gap:7px}}
+    }}
+    @media(max-width:900px){{.metric-grid{{grid-template-columns:repeat(2,1fr)}}.two-col{{grid-template-columns:1fr}}}}
+    """
+
+    return f"""<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'><title>First Intelligence | Business Performance</title><style>{css}</style></head>
+    <body><div class='print-toolbar'><span>Visualização de impressão · {esc(scope_text)} · {esc(period_text)}</span><button onclick='window.print()'>Imprimir / Salvar em PDF</button></div>
+    <main class='report'>{''.join(body)}</main></body></html>"""
+
 # =========================================================
 # FONTES, USUÁRIO E FILTROS
 # =========================================================
@@ -2245,10 +2569,14 @@ with st.sidebar:
         scope_choice = user["linha"] if user["linha"] in LINES else "VENDAS"
 
     st.markdown("#### Navegação")
-    pages = ["Dashboard", "Desempenho & metas", "Recebimentos & inadimplência", "Clientes", "Produtos", "Centro de custos"]
+    pages = ["Dashboard", "Desempenho & metas", "Recebimentos & inadimplência", "Clientes", "Produtos", "Centro de custos", "Relatório para impressão"]
     if is_director:
         pages.insert(1, "Linhas de negócio")
-    page = st.radio("Navegação", pages, label_visibility="collapsed")
+    if "nav_page" not in st.session_state or st.session_state.get("nav_page") not in pages:
+        st.session_state["nav_page"] = pages[0]
+    if st.button("🖨️ Abrir impressão visual", width="stretch", key="open_visual_print"):
+        st.session_state["nav_page"] = "Relatório para impressão"
+    page = st.radio("Navegação", pages, label_visibility="collapsed", key="nav_page")
 
 
 period_text = f"{month_label(start_month)} a {month_label(end_month)}"
@@ -2324,9 +2652,27 @@ with st.sidebar:
 
 
 # =========================================================
+# RELATÓRIO VISUAL PARA IMPRESSÃO
+# =========================================================
+if page == "Relatório para impressão":
+    st.markdown("<div class='section-head'><div><h3>Relatório visual completo</h3></div><span class='section-badge'>Ctrl + P</span></div>", unsafe_allow_html=True)
+    st.caption("A visualização abaixo reúne todos os menus com as mesmas cores do dashboard. Use o botão interno para imprimir ou salvar em PDF.")
+    print_html = build_business_performance_print_html(
+        scope_choice=scope_choice, user=user, start_month=start_month, end_month=end_month,
+        fat=fat, metas=metas, metas_g=metas_g, receitas=receitas, despesas=despesas,
+        custos=custos, performance=performance, inad=inad,
+        company_monthly=company_monthly, company_totals=company_totals,
+        line_monthly=line_monthly, line_totals=line_totals,
+        commercial_monthly=commercial_monthly, commercial_totals=commercial_totals,
+        lines_table=lines_table, fat_scope=fat_scope, rec_scope=rec_scope,
+        cost_scope=cost_scope, inad_scope=inad_scope,
+    )
+    components.html(print_html, height=1250, scrolling=True)
+
+# =========================================================
 # DASHBOARD
 # =========================================================
-if page == "Dashboard":
+elif page == "Dashboard":
     if scope_choice == "CONSOLIDADO":
         k1, k2, k3, k4 = st.columns(4)
         with k1: card("Receitas operacionais recebidas", brl(company_totals["Receitas Operacionais"]), "Entradas efetivamente recebidas da operação", BLUE)
