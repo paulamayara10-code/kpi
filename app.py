@@ -363,6 +363,16 @@ def line_label(line: str) -> str:
     return LINE_LABELS.get(norm(line), str(line).title())
 
 
+def cost_center_label(value: object) -> str:
+    """Padroniza a exibição dos centros de custos oficiais sem alterar a base."""
+    key = norm(value)
+    if key in LINES:
+        return line_label(key)
+    if value is None or key == "":
+        return "Não informado"
+    return str(value).strip()
+
+
 def rateio_line_key(value: object) -> str:
     """Converte o Centro de Custos Rateado para uma das linhas oficiais."""
     key = norm(value)
@@ -1847,8 +1857,8 @@ def seller_performance(
         out["Faturamento"] = out["Faturamento"].fillna(0.0)
 
     out["Meta"] = out["Meta"].fillna(0.0)
-    # Mantém a diretriz visual: integrantes sem participação no período não aparecem.
-    out = out[out["Faturamento"] > 0].copy()
+    # A aba Metas define a equipe oficial. Todos os integrantes cadastrados aparecem,
+    # inclusive quando ainda não possuem faturamento no período selecionado.
     out["Desvio"] = out["Faturamento"] - out["Meta"]
     out["Atingimento"] = np.where(out["Meta"] > 0, out["Faturamento"] / out["Meta"], 0.0)
     out["Status"] = np.select(
@@ -2541,7 +2551,7 @@ def build_business_performance_pdf(
         cc = cc[cc["_CC_N"] == scope_choice].copy()
     cc["Movimento"] = np.where(cc["_EMPRESA_N"] == "RECEITA", "Receita", "Despesa")
     cc["Classificação"] = np.where(cc["_GRUPO_N"].str.contains("NAO OPERACIONAIS", na=False), "Não operacional", "Operacional")
-    cc["Departamento"] = cc["CENTRO DE CUSTOS"].fillna("Não informado").astype(str).str.strip()
+    cc["Departamento"] = cc["CENTRO DE CUSTOS"].map(cost_center_label)
     if not cc.empty:
         cc_revenue = float(cc.loc[cc["Movimento"] == "Receita", "_VALOR"].sum())
         cc_expense = float(cc.loc[cc["Movimento"] == "Despesa", "_VALOR"].sum())
@@ -2846,7 +2856,7 @@ def build_business_performance_print_html(
         cc = cc[cc["_CC_N"] == scope_choice].copy()
     cc["Movimento"] = np.where(cc["_EMPRESA_N"] == "RECEITA", "Receita", "Despesa")
     cc["Classificação"] = np.where(cc["_GRUPO_N"].str.contains("NAO OPERACIONAIS", na=False), "Não operacional", "Operacional")
-    cc["Departamento"] = cc["CENTRO DE CUSTOS"].fillna("Não informado").astype(str).str.strip()
+    cc["Departamento"] = cc["CENTRO DE CUSTOS"].map(cost_center_label)
     cc_parts = []
     if not cc.empty:
         total_rev = float(cc.loc[cc["Movimento"] == "Receita", "_VALOR"].sum())
@@ -3976,7 +3986,7 @@ elif page == "Centro de custos":
         cc_base["_GRUPO_N"].str.contains("NAO OPERACIONAIS", na=False),
         "Não operacional", "Operacional",
     )
-    cc_base["Departamento"] = cc_base["CENTRO DE CUSTOS"].astype(str).str.strip()
+    cc_base["Departamento"] = cc_base["CENTRO DE CUSTOS"].map(cost_center_label)
 
     # Para gestores, o departamento é sempre o centro de custo direto da própria linha.
     # A coluna de rateio não participa dos cálculos nem da exibição desta página.
