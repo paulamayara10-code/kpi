@@ -77,8 +77,18 @@ st.markdown(
     .block-container {{ max-width:1540px; padding-top:1.15rem !important; padding-bottom:1.25rem; }}
     [data-testid="stSidebar"] {{ background:linear-gradient(180deg,#071B33 0%,#0B2F55 100%); border-right:0; }}
     [data-testid="stSidebar"] .block-container {{ padding-top:1rem; }}
-    [data-testid="stSidebar"] label, [data-testid="stSidebar"] p, [data-testid="stSidebar"] span {{ color:#EAF4FB; }}
-    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4 {{ color:#FFFFFF; }}
+    [data-testid="stSidebar"] label, [data-testid="stSidebar"] p, [data-testid="stSidebar"] span {{ color:#F4F8FC !important; opacity:1 !important; }}
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4 {{ color:#FFFFFF !important; }}
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {{ color:#D8E7F3 !important; opacity:1 !important; line-height:1.45; }}
+    [data-testid="stSidebar"] div[data-testid="stButton"] button {{
+        background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.20); color:#FFFFFF !important;
+        min-height:2.55rem; box-shadow:none;
+    }}
+    [data-testid="stSidebar"] div[data-testid="stButton"] button:hover {{
+        background:rgba(255,255,255,.17); border-color:rgba(255,255,255,.32);
+    }}
+    [data-testid="stSidebar"] div[data-testid="stButton"] button p {{ color:#FFFFFF !important; opacity:1 !important; }}
     [data-testid="stSidebar"] [data-baseweb="select"] > div,
     [data-testid="stSidebar"] input {{ background:#FFFFFF; color:#071B33; border-radius:10px; }}
     [data-testid="stSidebar"] [data-baseweb="select"] span,
@@ -206,6 +216,17 @@ def client_key(value: object) -> str:
     text = re.sub(r"[^A-Z0-9 ]", " ", text)
     text = re.sub(r"\b(LTDA|EPP|EIRELI|ME|S A|SA|ASSOCIACAO|FUNDACAO)\b", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def document_key(value: object) -> str:
+    """Normaliza NF/documento para cruzamento entre BASE BI e Centro de Custos."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return ""
+    text = str(value).strip()
+    if re.fullmatch(r"\d+\.0", text):
+        text = text[:-2]
+    digits = re.sub(r"\D", "", text)
+    return digits.lstrip("0") if digits else ""
 
 
 def product_key(value: object) -> str:
@@ -958,6 +979,85 @@ def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     receb = receb[receb["_MES"].notna()].copy()
 
     return {"receitas": receitas, "despesas": despesas, "custos": custos, "caixa": caixa, "recebimento": receb, "sheet_states": states}
+
+
+def correct_microtech_receipts_in_vendas(
+    custos: pd.DataFrame, fat: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """Corrige recebimentos Microtech lançados no CC Vendas.
+
+    A correção é restrita a receitas operacionais e exige evidência na BASE BI:
+    1) mesma nota + mesmo cliente com GERENTE = CELSO; ou
+    2) cliente com 100% do faturamento de 2026 atribuído ao CELSO, quando a nota não casa.
+
+    Custos/despesas nunca são alterados e CENTRO DE CUSTOS RATEAO não é utilizado.
+    """
+    out = custos.copy()
+    stats: dict[str, object] = {"count": 0, "value": 0.0, "details": pd.DataFrame()}
+    required_cost = {"_EMPRESA_N", "_GRUPO_N", "_CC_N", "CENTRO DE CUSTOS", "Codigo-Nome do Fornecedor", "Prf-Numero Parcela", "_VALOR"}
+    required_fat = {"_CLIENT_KEY", "_VALOR", "_LINHA", "GERENTE", "Nota Fiscal"}
+    if not required_cost.issubset(out.columns) or not required_fat.issubset(fat.columns):
+        return out, stats
+
+    out["_CENTRO_DE_CUSTOS_ORIGINAL"] = out["CENTRO DE CUSTOS"]
+    out["_CC_AJUSTADO"] = False
+    out["_CRITERIO_CC"] = "Centro de Custos original"
+    out["_CLIENT_KEY_CC"] = out["Codigo-Nome do Fornecedor"].map(client_key)
+    out["_DOC_KEY_CC"] = out["Prf-Numero Parcela"].map(document_key)
+
+    billing = fat.copy()
+    billing["_GERENTE_N"] = billing["GERENTE"].map(norm)
+    billing["_DOC_KEY_FAT"] = billing["Nota Fiscal"].map(document_key)
+    billing = billing[(billing["_GERENTE_N"] == "CELSO") & (billing["_LINHA"] == "MICROTECH")].copy()
+    if billing.empty:
+        return out, stats
+
+    exact_pairs = set(
+        billing.loc[(billing["_CLIENT_KEY"] != "") & (billing["_DOC_KEY_FAT"] != ""), ["_CLIENT_KEY", "_DOC_KEY_FAT"]]
+        .drop_duplicates().itertuples(index=False, name=None)
+    )
+
+    client_all = (
+        fat.groupby(["_CLIENT_KEY", "_LINHA"], as_index=False)["_VALOR"].sum()
+        .sort_values("_VALOR", ascending=False)
+    )
+    client_all["_TOTAL_CLIENTE"] = client_all.groupby("_CLIENT_KEY")["_VALOR"].transform("sum")
+    client_all["_SHARE"] = np.where(client_all["_TOTAL_CLIENTE"] != 0, client_all["_VALOR"] / client_all["_TOTAL_CLIENTE"], 0)
+    exclusive_clients = set(
+        client_all.loc[(client_all["_LINHA"] == "MICROTECH") & (client_all["_SHARE"] >= .999999), "_CLIENT_KEY"]
+    )
+
+    revenue_mask = (
+        (out["_EMPRESA_N"] == "RECEITA") &
+        (out["_GRUPO_N"] == "RECEITAS OPERACIONAIS") &
+        (out["_CC_N"] == "VENDAS")
+    )
+    exact_mask = pd.Series(
+        [(ck, dk) in exact_pairs for ck, dk in zip(out["_CLIENT_KEY_CC"], out["_DOC_KEY_CC"])],
+        index=out.index,
+    )
+    fallback_mask = (out["_DOC_KEY_CC"] == "") | (~exact_mask)
+    client_mask = out["_CLIENT_KEY_CC"].isin(exclusive_clients) & fallback_mask
+    adjust_mask = revenue_mask & (exact_mask | client_mask)
+
+    out.loc[adjust_mask, "CENTRO DE CUSTOS"] = "MICROTECH"
+    out.loc[adjust_mask, "_CC_N"] = "MICROTECH"
+    out.loc[adjust_mask, "_LINHA_DIRETA"] = "MICROTECH"
+    out.loc[adjust_mask, "_CC_AJUSTADO"] = True
+    out.loc[adjust_mask & exact_mask, "_CRITERIO_CC"] = "Nota + cliente + gerente Celso"
+    out.loc[adjust_mask & ~exact_mask, "_CRITERIO_CC"] = "Cliente exclusivo Microtech"
+
+    details_cols = [
+        "MÊS", "Codigo-Nome do Fornecedor", "Prf-Numero Parcela", "_VALOR",
+        "_CENTRO_DE_CUSTOS_ORIGINAL", "CENTRO DE CUSTOS", "_CRITERIO_CC",
+    ]
+    details = out.loc[adjust_mask, [c for c in details_cols if c in out.columns]].copy()
+    stats = {
+        "count": int(adjust_mask.sum()),
+        "value": float(out.loc[adjust_mask, "_VALOR"].sum()),
+        "details": details,
+    }
+    return out, stats
 
 
 VARIABLE_COSTS = {
@@ -2635,6 +2735,9 @@ try:
         despesas = filter_analysis_year(rev["despesas"])
         custos = filter_analysis_year(rev["custos"])
         performance = filter_analysis_year(rev["recebimento"])
+        # Ajuste pontual: recebimentos Microtech comprovados na BASE BI não permanecem em Vendas.
+        # Custos continuam integralmente classificados pelo CENTRO DE CUSTOS original.
+        custos, cc_microtech_stats = correct_microtech_receipts_in_vendas(custos, fat)
         receitas, receipt_match_stats = assign_receipt_lines(receitas_base, fat)
         inad = None
         inad_meta = None
@@ -2643,24 +2746,6 @@ try:
 except Exception as exc:
     st.error(f"Não foi possível carregar as bases: {exc}")
     st.stop()
-
-with st.sidebar:
-    with st.expander("Conferência da atualização", expanded=False):
-        origem_base = "arquivo enviado nesta sessão" if use_session_uploads and up_base is not None else "repositório"
-        origem_rev = "arquivo enviado nesta sessão" if use_session_uploads and up_rev is not None else "repositório"
-
-        max_fat_date = fat["_DATA"].max() if "_DATA" in fat.columns and not fat.empty else pd.NaT
-        max_fat_text = max_fat_date.strftime("%d/%m/%Y") if pd.notna(max_fat_date) else "sem data"
-        total_fat_base = float(fat["_VALOR"].sum()) if "_VALOR" in fat.columns else 0.0
-
-        st.markdown(f"**BASE BI ativa:** `{base_name}`")
-        st.caption(f"Origem: {origem_base} · Identificador: {base_id}")
-        st.caption(f"Faturamento: {len(fat):,} linhas · última emissão: {max_fat_text}".replace(",", "."))
-        st.caption(f"Total bruto de {ANALYSIS_YEAR}: {brl(total_fat_base)}")
-        st.markdown(f"**REV2026 ativa:** `{rev_name}`")
-        st.caption(f"Origem: {origem_rev} · Identificador: {rev_id}")
-        st.caption(f"Lançamentos no Centro de Custos: {len(custos):,}".replace(",", "."))
-        st.caption("Os identificadores mudam sempre que o conteúdo dos arquivos muda.")
 
 all_periods = pd.concat([fat["_MES"], receitas["_MES"], despesas["_MES"], custos["_MES"], performance["_MES"]]).dropna()
 all_periods = all_periods[all_periods.map(lambda value: value.year if isinstance(value, pd.Period) else pd.Period(value, freq="M").year).eq(ANALYSIS_YEAR)]
@@ -2724,45 +2809,6 @@ commercial_totals = commercial_performance_totals(commercial_monthly, metas_g, s
 lines_table = line_summary(fat, metas_g, receitas, custos, start_month, end_month, inad)
 fat_scope, rec_scope, cost_scope, inad_scope = scoped_data(scope_choice, fat, receitas, custos, inad, start_month, end_month)
 
-report_key = f"{base_id}|{rev_id}|{inad_id}|{scope_choice}|{start_month}|{end_month}|{user.get('nome', '')}"
-if st.session_state.get("business_pdf_key") != report_key:
-    st.session_state.pop("business_pdf_bytes", None)
-    st.session_state.pop("business_pdf_name", None)
-    st.session_state["business_pdf_key"] = report_key
-
-with st.sidebar:
-    st.markdown("#### Relatório completo")
-    st.caption("Compilado de todos os menus, respeitando o período, o escopo e o perfil de acesso.")
-    if st.button("Gerar PDF para impressão", width="stretch", key="generate_complete_pdf"):
-        try:
-            with st.spinner("Montando relatório paginado..."):
-                pdf_bytes = build_business_performance_pdf(
-                    scope_choice=scope_choice, user=user, start_month=start_month, end_month=end_month,
-                    fat=fat, metas=metas, metas_g=metas_g, receitas=receitas, despesas=despesas,
-                    custos=custos, performance=performance, inad=inad,
-                    company_monthly=company_monthly, company_totals=company_totals,
-                    line_monthly=line_monthly, line_totals=line_totals,
-                    commercial_monthly=commercial_monthly, commercial_totals=commercial_totals,
-                    lines_table=lines_table, fat_scope=fat_scope, rec_scope=rec_scope,
-                    cost_scope=cost_scope, inad_scope=inad_scope,
-                )
-            scope_file = norm(scope_choice).lower().replace(" ", "_")
-            st.session_state["business_pdf_bytes"] = pdf_bytes
-            st.session_state["business_pdf_name"] = (
-                f"first_business_performance_{scope_file}_{start_month}_{end_month}.pdf"
-            )
-        except Exception as exc:
-            st.error(f"Não foi possível gerar o PDF: {exc}")
-
-    if st.session_state.get("business_pdf_bytes"):
-        st.download_button(
-            "Baixar relatório em PDF",
-            data=st.session_state["business_pdf_bytes"],
-            file_name=st.session_state.get("business_pdf_name", "first_business_performance.pdf"),
-            mime="application/pdf",
-            width="stretch",
-            key="download_complete_pdf",
-        )
 
 
 # =========================================================
