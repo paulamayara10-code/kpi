@@ -3513,7 +3513,7 @@ elif page == "Desempenho & metas":
     )
     seller_perf = seller_performance(fat, metas, start_month, end_month, scope_choice)
     seller_unmatched_total = float(seller_perf.attrs.get("unmatched_total", 0.0))
-    if is_controller and seller_unmatched_total > 0:
+    if is_controladoria and seller_unmatched_total > 0:
         st.warning(
             f"{brl(seller_unmatched_total)} do faturamento do período não encontrou um vendedor/representante "
             "correspondente na aba Metas. O valor permanece no total da linha, mas não foi atribuído "
