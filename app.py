@@ -681,10 +681,15 @@ def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     users = read_excel_sheet(file_bytes, "Usuarios") if "Usuarios" in states else pd.DataFrame()
 
     date_col = require_col(fat, ["DT Emissao", "MÊS"], "BANCO DE DADOS FATURAMENTO")
-    month_col = require_col(fat, ["MÊS", "DT Emissao"], "BANCO DE DADOS FATURAMENTO")
+    month_col = optional_col(fat, ["MÊS"])
     value_col = require_col(fat, ["VALOR BRUTO", "VALOR ", "VALOR"], "BANCO DE DADOS FATURAMENTO")
-    fat["_DATA"] = pd.to_datetime(fat[date_col], errors="coerce")
-    fat["_MES"] = pd.to_datetime(fat[month_col], errors="coerce").dt.to_period("M")
+    # O período comercial deve acompanhar a data real da emissão. A coluna MÊS
+    # pode conter fórmula ou resultado salvo e, por isso, é apenas fallback.
+    fat["_DATA"] = to_datetime_mixed(fat[date_col])
+    fat["_MES"] = fat["_DATA"].dt.to_period("M")
+    if month_col:
+        fallback_month = to_datetime_mixed(fat[month_col]).dt.to_period("M")
+        fat["_MES"] = fat["_MES"].where(fat["_MES"].notna(), fallback_month)
     fat["_VALOR"] = to_number(fat[value_col])
     for col in [
         "GERENTE", "VENDEDOR / REPRESENTANTE", "VENDEDOR", "SEGMENTO", "EMPRESA", "NOVA",
@@ -1286,6 +1291,22 @@ def period_filter(df: pd.DataFrame, start: pd.Period, end: pd.Period) -> pd.Data
     return df[df["_MES"].between(start, end)].copy()
 
 
+def billing_by_line(fat: pd.DataFrame, line: str) -> pd.DataFrame:
+    """Filtra faturamento diretamente pela coluna GERENTE da BASE BI.
+
+    A classificação interna da linha permanece apenas como contingência quando a
+    base não trouxer gerente. Para Ronaldo/Endoscopia, por exemplo, o critério
+    oficial passa a ser GERENTE = RONALDO.
+    """
+    if line == "CONSOLIDADO":
+        return fat.copy()
+    manager = LINE_MANAGER_MAP.get(line, "")
+    if manager and "GERENTE" in fat.columns:
+        manager_key = fat["GERENTE"].map(norm)
+        return fat[manager_key == manager].copy()
+    return fat[fat["_LINHA"] == line].copy()
+
+
 def company_cash_monthly(
     fat: pd.DataFrame, metas: pd.DataFrame, receitas: pd.DataFrame, despesas: pd.DataFrame,
     performance: pd.DataFrame, start: pd.Period, end: pd.Period,
@@ -1335,7 +1356,7 @@ def commercial_performance_monthly(
     fbase = fat.copy()
     mbase = metas_g.copy()
     if line != "CONSOLIDADO":
-        fbase = fbase[fbase["_LINHA"] == line]
+        fbase = billing_by_line(fbase, line)
         manager = LINE_MANAGER_MAP.get(line, "")
         if "GERENTE" in mbase.columns:
             mbase = mbase[mbase["GERENTE"].map(norm) == manager]
@@ -1393,7 +1414,7 @@ def seller_performance(
     fbase = period_filter(fat, start, end).copy()
     mbase = period_filter(metas, start, end).copy()
     if line != "CONSOLIDADO":
-        fbase = fbase[fbase["_LINHA"] == line]
+        fbase = billing_by_line(fbase, line)
         manager = LINE_MANAGER_MAP.get(line, "")
         if "GERENTE" in mbase.columns:
             mbase = mbase[mbase["GERENTE"].map(norm) == manager]
@@ -1442,7 +1463,7 @@ def line_cash_monthly(
     out = pd.DataFrame({"Mês": months})
 
     f = (
-        period_filter(fat[fat["_LINHA"] == line], start, end)
+        period_filter(billing_by_line(fat, line), start, end)
         .groupby("_MES", as_index=False)["_VALOR"].sum()
         .rename(columns={"_MES": "Mês", "_VALOR": "Faturamento"})
     )
@@ -1555,7 +1576,7 @@ def scoped_data(scope: str, fat: pd.DataFrame, receitas: pd.DataFrame, custos: p
         c = period_filter(custos[(custos["_GRUPO_N"] == "SAIDAS OPERACIONAIS") & (custos["_LINHA_DIRETA"].isin(LINES))], start, end)
         i = inad.copy() if inad is not None else None
     else:
-        f = period_filter(fat[fat["_LINHA"] == scope], start, end)
+        f = period_filter(billing_by_line(fat, scope), start, end)
         r = period_filter(receitas[(receitas["_LINHA"] == scope) & (~receitas["_NAO_OPERACIONAL"])], start, end)
         c = period_filter(custos[(custos["_LINHA_DIRETA"] == scope) & (custos["_GRUPO_N"] == "SAIDAS OPERACIONAIS")], start, end)
         i = inad[inad["_LINHA"] == scope].copy() if inad is not None else None
