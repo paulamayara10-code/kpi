@@ -1105,6 +1105,14 @@ def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
         custos["_LINHA_RATEIO"].isin(LINES) &
         (~custos["_CC_N"].isin(LINES))
     ].copy()
+
+    # Cenário alternativo: resultado integral por linha após o rateio administrativo.
+    # Aqui receitas e despesas são atribuídas pela coluna Centro de Custos Rateado.
+    # Esta base não altera o resultado direto, que continua usando Centro de Custos.
+    custos_rateados = custos[
+        custos["_EMPRESA_N"].isin(["DESPESAS", "RECEITA"]) &
+        custos["_LINHA_RATEIO"].isin(LINES)
+    ].copy()
     rateio_meta = {
         "column": rateio_col or "Não localizada",
         "rows": int(len(rateio)),
@@ -1131,7 +1139,8 @@ def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
 
     return {
         "receitas": receitas, "despesas": despesas, "custos": custos,
-        "rateio": rateio, "rateio_meta": rateio_meta, "caixa": caixa,
+        "rateio": rateio, "custos_rateados": custos_rateados,
+        "rateio_meta": rateio_meta, "caixa": caixa,
         "recebimento": receb, "sheet_states": states,
     }
 
@@ -1563,6 +1572,42 @@ def authenticate() -> dict[str, str]:
 # =========================================================
 def period_filter(df: pd.DataFrame, start: pd.Period, end: pd.Period) -> pd.DataFrame:
     return df[df["_MES"].between(start, end)].copy()
+
+
+def allocated_cost_center_result(
+    custos_rateados: pd.DataFrame, start: pd.Period, end: pd.Period,
+) -> pd.DataFrame:
+    """Apura o resultado de cada linha pela coluna Centro de Custos Rateado."""
+    columns = [
+        "Código", "Linha", "Receitas após rateio", "Despesas após rateio",
+        "Resultado após rateio", "Margem após rateio",
+    ]
+    if custos_rateados is None or custos_rateados.empty:
+        return pd.DataFrame([
+            {
+                "Código": line, "Linha": line_label(line),
+                "Receitas após rateio": 0.0, "Despesas após rateio": 0.0,
+                "Resultado após rateio": 0.0, "Margem após rateio": 0.0,
+            }
+            for line in LINES
+        ], columns=columns)
+
+    period = period_filter(custos_rateados, start, end).copy()
+    rows = []
+    for line in LINES:
+        part = period[period["_LINHA_RATEIO"] == line]
+        revenue = float(part.loc[part["_EMPRESA_N"] == "RECEITA", "_VALOR"].sum())
+        expense = float(part.loc[part["_EMPRESA_N"] == "DESPESAS", "_VALOR"].sum())
+        result = revenue - expense
+        rows.append({
+            "Código": line,
+            "Linha": line_label(line),
+            "Receitas após rateio": revenue,
+            "Despesas após rateio": expense,
+            "Resultado após rateio": result,
+            "Margem após rateio": safe_div(result, revenue),
+        })
+    return pd.DataFrame(rows, columns=columns)
 
 
 def billing_by_line(fat: pd.DataFrame, line: str) -> pd.DataFrame:
@@ -3058,6 +3103,7 @@ try:
         despesas = filter_analysis_year(rev["despesas"])
         custos = filter_analysis_year(rev["custos"])
         rateio = filter_analysis_year(rev.get("rateio", pd.DataFrame()))
+        custos_rateados = filter_analysis_year(rev.get("custos_rateados", pd.DataFrame()))
         performance = filter_analysis_year(rev["recebimento"])
         # Ajuste pontual: recebimentos Microtech comprovados na BASE BI não permanecem em Vendas.
         # Custos continuam integralmente classificados pelo CENTRO DE CUSTOS original.
@@ -3980,6 +4026,71 @@ elif page == "Validação dos dados" and can_validate:
 # =========================================================
 elif page == "Centro de custos":
     section_header("Centro de custos", badge=scope_text)
+
+    # Resultado alternativo, calculado pela distribuição administrativa da própria REV2026.
+    # Não substitui nem altera o resultado direto exibido nas demais páginas.
+    allocated_result = allocated_cost_center_result(custos_rateados, start_month, end_month)
+    allocated_view = (
+        allocated_result.copy()
+        if scope_choice == "CONSOLIDADO"
+        else allocated_result[allocated_result["Código"] == scope_choice].copy()
+    )
+
+    section_header(
+        "Resultado após rateio administrativo",
+        badge="Centro de Custos Rateado",
+    )
+    st.caption(
+        "Cenário calculado por receitas rateadas menos despesas rateadas. "
+        "O resultado direto continua sendo apurado exclusivamente pelo Centro de Custos original."
+    )
+
+    if allocated_view.empty:
+        st.info("Não foram encontrados lançamentos rateados para o período selecionado.")
+    else:
+        card_columns = st.columns(len(allocated_view))
+        for col, (_, row) in zip(card_columns, allocated_view.iterrows()):
+            value = float(row["Resultado após rateio"])
+            with col:
+                card(
+                    row["Linha"], brl(value),
+                    f"Margem após rateio: {pct(float(row['Margem após rateio']))}",
+                    BLUE if value >= 0 else RED,
+                )
+
+        chart_allocated = allocated_view.sort_values("Resultado após rateio", ascending=False).copy()
+        chart_allocated["Cor"] = np.where(chart_allocated["Resultado após rateio"] >= 0, BLUE, RED)
+        chart_allocated["Texto"] = chart_allocated["Resultado após rateio"].map(compact_money)
+        fig_allocated = go.Figure(go.Bar(
+            x=chart_allocated["Linha"],
+            y=chart_allocated["Resultado após rateio"],
+            marker_color=chart_allocated["Cor"],
+            text=chart_allocated["Texto"],
+            textposition="outside",
+            cliponaxis=False,
+            customdata=chart_allocated[["Receitas após rateio", "Despesas após rateio"]],
+            hovertemplate=(
+                "%{x}<br>Receitas rateadas: R$ %{customdata[0]:,.2f}"
+                "<br>Despesas rateadas: R$ %{customdata[1]:,.2f}"
+                "<br>Resultado: R$ %{y:,.2f}<extra></extra>"
+            ),
+        ))
+        fig_allocated.add_hline(y=0, line_color="#9FB3C8", line_width=1)
+        fig_allocated.update_layout(title="Resultado das linhas após o rateio administrativo")
+        hide_value_axis(fig_allocated, "y")
+        st.plotly_chart(
+            plot_layout(fig_allocated, 360, False),
+            width="stretch", config={"displayModeBar": False},
+        )
+
+        allocated_table = allocated_view.drop(columns=["Código"]).copy()
+        for column in ["Receitas após rateio", "Despesas após rateio", "Resultado após rateio"]:
+            allocated_table[column] = allocated_table[column].map(brl)
+        allocated_table["Margem após rateio"] = allocated_table["Margem após rateio"].map(pct)
+        clean_table(allocated_table, height=min(240, 54 + 36 * len(allocated_table)), max_rows=10)
+
+    st.markdown("---")
+    section_header("Movimentação pelo centro de custos direto", badge="Resultado direto")
     cc_base = period_filter(custos, start_month, end_month).copy()
     cc_base["Movimento"] = np.where(cc_base["_EMPRESA_N"] == "RECEITA", "Receita", "Despesa")
     cc_base["Classificação"] = np.where(
