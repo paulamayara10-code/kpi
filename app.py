@@ -152,6 +152,18 @@ st.markdown(
 
     .scope-note {{ background:#EDF4FA; border:1px solid #C9DDED; border-radius:13px; padding:11px 13px; color:#234F74; font-size:.77rem; line-height:1.45; }}
     .warning-note {{ background:#F2F7FB; border:1px solid #CCDDEC; border-radius:13px; padding:11px 13px; color:#315A7B; font-size:.77rem; line-height:1.45; }}
+    .rateio-info {{
+        display:flex; align-items:center; justify-content:space-between; gap:18px; flex-wrap:wrap;
+        background:linear-gradient(120deg,#EAF3FA 0%,#F8FBFE 100%); border:1px solid #C8DDED;
+        border-left:5px solid {CYAN}; border-radius:16px; padding:13px 16px; margin:8px 0 12px;
+        box-shadow:0 6px 18px rgba(7,27,51,.045);
+    }}
+    .rateio-info .rateio-copy {{ min-width:240px; flex:1; }}
+    .rateio-info .rateio-label {{ color:{NAVY}; font-size:.76rem; font-weight:900; letter-spacing:.045em; text-transform:uppercase; }}
+    .rateio-info .rateio-note {{ color:#52677C; font-size:.73rem; line-height:1.42; margin-top:4px; }}
+    .rateio-info .rateio-value {{ color:{NAVY}; font-size:1.38rem; font-weight:950; letter-spacing:-.035em; white-space:nowrap; }}
+    .rateio-chips {{ display:flex; flex-wrap:wrap; gap:6px; width:100%; }}
+    .rateio-chip {{ background:#FFFFFF; border:1px solid #D6E4EF; border-radius:999px; padding:5px 9px; color:#315A7B; font-size:.68rem; font-weight:800; }}
     .secure-note {{ background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.14); border-radius:12px; padding:10px 12px; color:#EAF4FB; font-size:.73rem; line-height:1.4; }}
     .login-brand {{ text-align:center; margin:3.8rem auto 1.2rem auto; }}
     .login-brand .logo {{ color:#071B33; font-size:1.55rem; font-weight:950; letter-spacing:.15em; }}
@@ -353,6 +365,55 @@ def month_label(period: pd.Period) -> str:
 
 def line_label(line: str) -> str:
     return LINE_LABELS.get(norm(line), str(line).title())
+
+
+def rateio_line_key(value: object) -> str:
+    """Converte o Centro de Custos Rateado para uma das linhas oficiais."""
+    key = norm(value)
+    if key in LINES:
+        return key
+    if key in MANAGER_LINE_MAP:
+        return MANAGER_LINE_MAP[key]
+    if "MICROTECH" in key or "MICRO TECH" in key:
+        return "MICROTECH"
+    if "LOCAC" in key:
+        return "LOCACAO"
+    if "ENDOSC" in key:
+        return "ENDOSCOPIA"
+    if "VENDA" in key:
+        return "VENDAS"
+    return "NAO CLASSIFICADA"
+
+
+def rateio_info(total: float, scope: str, breakdown: dict[str, float] | None = None) -> None:
+    """Exibe o rateio apenas como transparência, sem compor o resultado direto."""
+    consolidated = scope == "CONSOLIDADO"
+    label = "Despesas gerais distribuídas às linhas" if consolidated else "Contribuição às despesas gerais"
+    note = (
+        "Despesas dos departamentos gerais distribuídas à linha pela coluna Centro de Custos Rateado. "
+        "O valor é apenas informativo e não altera receitas, despesas, margem ou resultado direto."
+    )
+    chips = ""
+    if consolidated and breakdown:
+        chip_items = []
+        for line in LINES:
+            chip_items.append(
+                f"<span class='rateio-chip'>{html.escape(line_label(line))}: {html.escape(brl(float(breakdown.get(line, 0))))}</span>"
+            )
+        chips = "<div class='rateio-chips'>" + "".join(chip_items) + "</div>"
+    st.markdown(
+        f"""
+        <div class='rateio-info'>
+          <div class='rateio-copy'>
+            <div class='rateio-label'>{html.escape(label)}</div>
+            <div class='rateio-note'>{html.escape(note)}</div>
+          </div>
+          <div class='rateio-value'>{html.escape(brl(float(total or 0)))}</div>
+          {chips}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def card(label: str, value: str, note: str = "", tone: str = CYAN, delta: str = "", bad: bool = False) -> None:
@@ -962,9 +1023,23 @@ def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     custos["_EMPRESA_N"] = custos["EMPRESA"].map(norm)
     custos["_GRUPO_N"] = custos["GRUPO"].map(norm)
     custos["_CC_N"] = custos["CENTRO DE CUSTOS"].map(norm)
-    # Regra de gestão: toda visão departamental usa exclusivamente CENTRO DE CUSTOS.
-    # A coluna de rateio é removida para impedir uso acidental nos cálculos e filtros.
-    custos = custos.drop(columns=["CENTRO DE CUSTOS RATEAO"], errors="ignore")
+
+    # O rateio é preservado em uma base separada e exclusivamente informativa.
+    # Ele nunca substitui o Centro de Custos direto nos cálculos de resultado.
+    if "CENTRO DE CUSTOS RATEAO" in custos.columns:
+        custos["_CC_RATEIO_N"] = custos["CENTRO DE CUSTOS RATEAO"].map(norm)
+        custos["_LINHA_RATEIO"] = custos["CENTRO DE CUSTOS RATEAO"].map(rateio_line_key)
+    else:
+        custos["_CC_RATEIO_N"] = ""
+        custos["_LINHA_RATEIO"] = "NAO CLASSIFICADA"
+    rateio = custos[
+        (custos["_EMPRESA_N"] == "DESPESAS") &
+        custos["_LINHA_RATEIO"].isin(LINES) &
+        (~custos["_CC_N"].isin(LINES))
+    ].copy()
+
+    # Regra de gestão: toda visão departamental e todo resultado usam exclusivamente CENTRO DE CUSTOS.
+    custos = custos.drop(columns=["CENTRO DE CUSTOS RATEAO", "_CC_RATEIO_N", "_LINHA_RATEIO"], errors="ignore")
     custos["_LINHA_DIRETA"] = custos["_CC_N"].where(custos["_CC_N"].isin(LINES), "NAO CLASSIFICADA")
     custos = custos[custos["_EMPRESA_N"].isin(["DESPESAS", "RECEITA"])].copy()
 
@@ -978,7 +1053,7 @@ def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     receb["_REALIZADO"] = to_number(receb[require_col(receb, ["Recebimento Realizado"], "Performance Recebimento")])
     receb = receb[receb["_MES"].notna()].copy()
 
-    return {"receitas": receitas, "despesas": despesas, "custos": custos, "caixa": caixa, "recebimento": receb, "sheet_states": states}
+    return {"receitas": receitas, "despesas": despesas, "custos": custos, "rateio": rateio, "caixa": caixa, "recebimento": receb, "sheet_states": states}
 
 
 def correct_microtech_receipts_in_vendas(
@@ -2286,7 +2361,7 @@ def build_business_performance_pdf(
     story.extend(section("Notas metodológicas", "Critérios usados na elaboração do relatório."))
     notes = [
         ["Regime de análise", "Os indicadores financeiros principais são gerenciais em regime de caixa."],
-        ["Linhas de negócio", "Receitas e despesas diretas são determinadas exclusivamente pela coluna Centro de Custos. A coluna de rateio não é utilizada."],
+        ["Linhas de negócio", "Receitas, despesas, margens e resultados diretos são determinados exclusivamente pela coluna Centro de Custos. O Centro de Custos Rateado aparece apenas como informação de contribuição às despesas gerais e não altera os cálculos."],
         ["Faturamento e metas", "São indicadores comerciais por competência e aparecem separados dos resultados financeiros realizados."],
         ["Inadimplência", "O saldo é obtido do relatório ativo do CRM de cobrança, conforme o perfil e a linha atribuídos."],
         ["Margem de contribuição de caixa", "Receitas operacionais recebidas menos saídas variáveis pagas, dividido pelas receitas operacionais recebidas."],
@@ -2312,6 +2387,7 @@ def build_business_performance_print_html(
     receitas: pd.DataFrame,
     despesas: pd.DataFrame,
     custos: pd.DataFrame,
+    rateio: pd.DataFrame,
     performance: pd.DataFrame,
     inad: pd.DataFrame | None,
     company_monthly: pd.DataFrame,
@@ -2540,12 +2616,20 @@ def build_business_performance_print_html(
     body.append(section("Produtos", "".join(product_parts) if product_parts else "<div class='empty'>Sem dados de produtos.</div>"))
 
     cc = period_filter(custos, start_month, end_month).copy()
+    rateio_print = period_filter(rateio, start_month, end_month).copy() if isinstance(rateio, pd.DataFrame) and not rateio.empty else pd.DataFrame()
     if scope_choice != "CONSOLIDADO":
         cc = cc[cc["_CC_N"] == scope_choice].copy()
+        if not rateio_print.empty:
+            rateio_print = rateio_print[rateio_print["_LINHA_RATEIO"] == scope_choice].copy()
+    rateio_print_total = float(rateio_print["_VALOR"].sum()) if not rateio_print.empty else 0.0
     cc["Movimento"] = np.where(cc["_EMPRESA_N"] == "RECEITA", "Receita", "Despesa")
     cc["Classificação"] = np.where(cc["_GRUPO_N"].str.contains("NAO OPERACIONAIS", na=False), "Não operacional", "Operacional")
     cc["Departamento"] = cc["CENTRO DE CUSTOS"].fillna("Não informado").astype(str).str.strip()
-    cc_parts = []
+    cc_parts = [
+        f"<div class='rateio-print'><div><b>{'Despesas gerais distribuídas às linhas' if scope_choice == 'CONSOLIDADO' else 'Contribuição às despesas gerais'}</b>"
+        f"<span>Departamentos gerais distribuídos pelo Centro de Custos Rateado · informativo, sem alterar o resultado direto</span></div>"
+        f"<strong>{brl(rateio_print_total)}</strong></div>"
+    ]
     if not cc.empty:
         total_rev = float(cc.loc[cc["Movimento"] == "Receita", "_VALOR"].sum())
         total_exp = float(cc.loc[cc["Movimento"] == "Despesa", "_VALOR"].sum())
@@ -2595,6 +2679,10 @@ def build_business_performance_print_html(
     .metric-label{{font-size:9px;font-weight:900;letter-spacing:.055em;text-transform:uppercase;color:#667085}}
     .metric-value{{font-size:18px;font-weight:950;color:#071B33;margin-top:8px;white-space:nowrap}}
     .metric-note{{font-size:9px;color:#667085;margin-top:9px;line-height:1.3}}
+    .rateio-print{{display:flex;align-items:center;justify-content:space-between;gap:18px;border:1px solid #C8DDED;border-left:5px solid {CYAN};background:linear-gradient(120deg,#EAF3FA,#F8FBFE);border-radius:14px;padding:13px 15px;margin:0 0 13px;break-inside:avoid}}
+    .rateio-print b{{display:block;color:#071B33;font-size:12px;text-transform:uppercase;letter-spacing:.04em}}
+    .rateio-print span{{display:block;color:#52677C;font-size:10px;margin-top:4px}}
+    .rateio-print strong{{font-size:20px;color:#071B33;white-space:nowrap}}
     .two-col{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
     .chart-card,.table-card{{border:1px solid var(--border);border-radius:16px;padding:8px;background:white;margin:10px 0;break-inside:avoid}}
     h3{{font-size:15px;color:#071B33;margin:15px 0 8px}}
@@ -2734,6 +2822,7 @@ try:
         receitas_base = filter_analysis_year(rev["receitas"])
         despesas = filter_analysis_year(rev["despesas"])
         custos = filter_analysis_year(rev["custos"])
+        rateio = filter_analysis_year(rev.get("rateio", pd.DataFrame()))
         performance = filter_analysis_year(rev["recebimento"])
         # Ajuste pontual: recebimentos Microtech comprovados na BASE BI não permanecem em Vendas.
         # Custos continuam integralmente classificados pelo CENTRO DE CUSTOS original.
@@ -2809,6 +2898,19 @@ commercial_totals = commercial_performance_totals(commercial_monthly, metas_g, s
 lines_table = line_summary(fat, metas_g, receitas, custos, start_month, end_month, inad)
 fat_scope, rec_scope, cost_scope, inad_scope = scoped_data(scope_choice, fat, receitas, custos, inad, start_month, end_month)
 
+rateio_period = period_filter(rateio, start_month, end_month) if isinstance(rateio, pd.DataFrame) and not rateio.empty else pd.DataFrame()
+if not rateio_period.empty:
+    rateio_breakdown = {
+        line: float(rateio_period.loc[rateio_period["_LINHA_RATEIO"] == line, "_VALOR"].sum())
+        for line in LINES
+    }
+else:
+    rateio_breakdown = {line: 0.0 for line in LINES}
+rateio_total = (
+    float(rateio_period["_VALOR"].sum())
+    if scope_choice == "CONSOLIDADO" and not rateio_period.empty
+    else float(rateio_breakdown.get(scope_choice, 0.0))
+)
 
 
 # =========================================================
@@ -2820,7 +2922,7 @@ if page == "Relatório para impressão":
     print_html = build_business_performance_print_html(
         scope_choice=scope_choice, user=user, start_month=start_month, end_month=end_month,
         fat=fat, metas=metas, metas_g=metas_g, receitas=receitas, despesas=despesas,
-        custos=custos, performance=performance, inad=inad,
+        custos=custos, rateio=rateio, performance=performance, inad=inad,
         company_monthly=company_monthly, company_totals=company_totals,
         line_monthly=line_monthly, line_totals=line_totals,
         commercial_monthly=commercial_monthly, commercial_totals=commercial_totals,
@@ -2967,6 +3069,8 @@ elif page == "Dashboard":
             card("Conversão em caixa", pct(t["Conversão em Caixa"]), "Receita recebida sobre faturamento", TEAL)
         with k8:
             card("Inadimplência", brl(overdue) if inad is not None else "Base não carregada", "Saldo vencido da linha", RED if overdue > 0 else BLUE)
+
+        rateio_info(rateio_total, scope_choice)
 
         c1, c2 = st.columns([1.18, 1])
         with c1:
@@ -3562,6 +3666,7 @@ elif page == "Produtos":
 # =========================================================
 elif page == "Centro de custos":
     section_header("Centro de custos", badge=scope_text)
+    rateio_info(rateio_total, scope_choice, rateio_breakdown if scope_choice == "CONSOLIDADO" else None)
 
     cc_base = period_filter(custos, start_month, end_month).copy()
     cc_base["Movimento"] = np.where(cc_base["_EMPRESA_N"] == "RECEITA", "Receita", "Despesa")
@@ -3572,7 +3677,7 @@ elif page == "Centro de custos":
     cc_base["Departamento"] = cc_base["CENTRO DE CUSTOS"].astype(str).str.strip()
 
     # Para gestores, o departamento é sempre o centro de custo direto da própria linha.
-    # Não existe uso de CENTRO DE CUSTOS RATEAO nesta página nem nos cálculos.
+    # O Centro de Custos Rateado é exibido apenas no informativo acima e não participa dos cálculos desta página.
     if scope_choice != "CONSOLIDADO":
         cc_base = cc_base[cc_base["_CC_N"] == scope_choice].copy()
 
