@@ -43,6 +43,7 @@ WHITE = "#FFFFFF"
 GRAY = "#667085"
 DARK = "#24364B"
 BORDER = "#E4EAF1"
+ANALYSIS_YEAR = 2026
 
 LINES = ["MICROTECH", "LOCACAO", "VENDAS", "ENDOSCOPIA"]
 LINE_LABELS = {
@@ -283,6 +284,18 @@ def pct(value: float) -> str:
 
 def safe_div(a: float, b: float) -> float:
     return float(a / b) if b not in (0, None) and not pd.isna(b) else 0.0
+
+
+def filter_analysis_year(df: pd.DataFrame, year: int = ANALYSIS_YEAR) -> pd.DataFrame:
+    """Mantém somente registros do ano-base na coluna mensal padronizada."""
+    if df is None or df.empty or "_MES" not in df.columns:
+        return df.copy() if isinstance(df, pd.DataFrame) else df
+    months = df["_MES"]
+    try:
+        years = months.dt.year
+    except Exception:
+        years = months.map(lambda value: value.year if isinstance(value, pd.Period) else pd.to_datetime(value, errors="coerce").year)
+    return df.loc[years.eq(year)].copy()
 
 
 def token_similarity(a: str, b: str) -> float:
@@ -2613,13 +2626,16 @@ try:
     with st.spinner("Organizando visão de caixa e linhas de negócio..."):
         base = load_base_bi(base_bytes)
         rev = load_rev(rev_bytes)
-        fat = base["faturamento"]
-        metas = base["metas"]
-        metas_g = base["metas_gerentes"]
-        receitas, receipt_match_stats = assign_receipt_lines(rev["receitas"], fat)
-        despesas = rev["despesas"]
-        custos = rev["custos"]
-        performance = rev["recebimento"]
+
+        # O painel é fechado exclusivamente no ano-base de 2026.
+        fat = filter_analysis_year(base["faturamento"])
+        metas = filter_analysis_year(base["metas"])
+        metas_g = filter_analysis_year(base["metas_gerentes"])
+        receitas_base = filter_analysis_year(rev["receitas"])
+        despesas = filter_analysis_year(rev["despesas"])
+        custos = filter_analysis_year(rev["custos"])
+        performance = filter_analysis_year(rev["recebimento"])
+        receitas, receipt_match_stats = assign_receipt_lines(receitas_base, fat)
         inad = None
         inad_meta = None
         if inad_bytes:
@@ -2640,18 +2656,22 @@ with st.sidebar:
         st.markdown(f"**BASE BI ativa:** `{base_name}`")
         st.caption(f"Origem: {origem_base} · Identificador: {base_id}")
         st.caption(f"Faturamento: {len(fat):,} linhas · última emissão: {max_fat_text}".replace(",", "."))
-        st.caption(f"Total bruto carregado: {brl(total_fat_base)}")
+        st.caption(f"Total bruto de {ANALYSIS_YEAR}: {brl(total_fat_base)}")
         st.markdown(f"**REV2026 ativa:** `{rev_name}`")
         st.caption(f"Origem: {origem_rev} · Identificador: {rev_id}")
         st.caption(f"Lançamentos no Centro de Custos: {len(custos):,}".replace(",", "."))
         st.caption("Os identificadores mudam sempre que o conteúdo dos arquivos muda.")
 
 all_periods = pd.concat([fat["_MES"], receitas["_MES"], despesas["_MES"], custos["_MES"], performance["_MES"]]).dropna()
+all_periods = all_periods[all_periods.map(lambda value: value.year if isinstance(value, pd.Period) else pd.Period(value, freq="M").year).eq(ANALYSIS_YEAR)]
+if all_periods.empty:
+    st.error(f"Não foram encontrados movimentos de {ANALYSIS_YEAR} nas bases carregadas.")
+    st.stop()
 min_month, max_month = all_periods.min(), all_periods.max()
 month_options = list(pd.period_range(min_month, max_month, freq="M"))
 
 with st.sidebar:
-    st.markdown("#### Período")
+    st.markdown(f"#### Período · {ANALYSIS_YEAR}")
     start_month = st.selectbox("Mês inicial", month_options, index=0, format_func=month_label)
     end_month = st.selectbox("Mês final", month_options, index=len(month_options) - 1, format_func=month_label)
     if start_month > end_month:
