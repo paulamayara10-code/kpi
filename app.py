@@ -808,21 +808,32 @@ def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     ]:
         if col in fat.columns:
             fat[col] = fat[col].fillna("Não informado").astype(str).str.strip()
-    # Uma única classificação canônica alimenta todas as telas. O gerente oficial
-    # prevalece; somente gerentes não mapeados ou vazios usam segmento/produto.
+    # A visão de cada gestor deve refletir exclusivamente o gerente oficial da BASE BI.
+    # O segmento/produto é usado somente quando o gerente estiver realmente ausente.
+    # Gerentes informados fora do mapa oficial (ex.: Gabriel) permanecem no consolidado,
+    # mas não são incorporados silenciosamente à linha Vendas ou a qualquer outro gestor.
     fallback_line = fat.apply(classify_billing_line, axis=1)
     fat["_LINHA_FALLBACK"] = fallback_line
     if "GERENTE" in fat.columns:
         fat["_GERENTE_N"] = fat["GERENTE"].map(norm)
         manager_line = fat["_GERENTE_N"].map(MANAGER_LINE_MAP)
+        manager_missing = fat["_GERENTE_N"].isin(["", "NAO INFORMADO", "NAN", "NONE"])
         fat["_LINHA_GERENTE"] = manager_line.fillna("NAO CLASSIFICADA")
-        fat["_LINHA"] = manager_line.where(manager_line.notna(), fallback_line)
-        fat["_CRITERIO_LINHA"] = np.where(manager_line.notna(), "Gerente oficial", "Segmento / produto")
+        fat["_LINHA"] = np.select(
+            [manager_line.notna(), manager_missing],
+            [manager_line, fallback_line],
+            default="NAO CLASSIFICADA",
+        )
+        fat["_CRITERIO_LINHA"] = np.select(
+            [manager_line.notna(), manager_missing],
+            ["Gerente oficial", "Segmento / produto (gerente ausente)"],
+            default="Gerente fora do mapa oficial",
+        )
     else:
         fat["_GERENTE_N"] = "NAO INFORMADO"
         fat["_LINHA_GERENTE"] = "NAO CLASSIFICADA"
         fat["_LINHA"] = fallback_line
-        fat["_CRITERIO_LINHA"] = "Segmento / produto"
+        fat["_CRITERIO_LINHA"] = "Segmento / produto (gerente ausente)"
     client_col = "NOME DO CLIENTE" if "NOME DO CLIENTE" in fat.columns else "CLIENTE"
     fat["_CLIENT_KEY"] = fat[client_col].map(client_key)
     fat["_TIPO_CAIXA"] = np.where(
@@ -1582,8 +1593,8 @@ def billing_by_line(fat: pd.DataFrame, line: str) -> pd.DataFrame:
     """Filtra pela classificação canônica criada uma única vez na BASE BI.
 
     Gerentes oficiais continuam soberanos (Celso, Renato, Amauri e Ronaldo).
-    Registros de gerente vazio ou não mapeado usam o segmento/produto e deixam de
-    desaparecer da soma das linhas. Assim, consolidado e linhas são reconciliáveis.
+    Apenas gerente ausente usa segmento/produto como contingência. Um gerente informado
+    fora do mapa permanece no consolidado, mas não é atribuído à linha de outro gestor.
     """
     if line == "CONSOLIDADO":
         return fat.copy()
@@ -1626,17 +1637,22 @@ def billing_reconciliation(
         by_manager = pd.DataFrame(columns=["Gerente", "Faturamento", "Linhas"])
 
     monthly_total = period.groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_VALOR": "Consolidado"})
-    monthly_line = period[period["_LINHA"].isin(LINES)].groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_VALOR": "Soma das linhas"})
-    monthly = monthly_total.merge(monthly_line, on="_MES", how="outer").fillna(0)
-    monthly["Diferença"] = monthly["Consolidado"] - monthly["Soma das linhas"]
+    monthly_line = period[period["_LINHA"].isin(LINES)].groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_VALOR": "Quatro linhas oficiais"})
+    monthly_other = period[~period["_LINHA"].isin(LINES)].groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_VALOR": "Outras gerências"})
+    monthly = monthly_total.merge(monthly_line, on="_MES", how="outer").merge(monthly_other, on="_MES", how="outer").fillna(0)
+    monthly["Diferença técnica"] = monthly["Consolidado"] - monthly["Quatro linhas oficiais"] - monthly["Outras gerências"]
     monthly["Mês"] = monthly["_MES"].map(month_label)
-    monthly = monthly[["Mês", "Consolidado", "Soma das linhas", "Diferença"]]
+    monthly = monthly[["Mês", "Consolidado", "Quatro linhas oficiais", "Outras gerências", "Diferença técnica"]]
 
+    unclassified_value = float(unclassified["_VALOR"].sum()) if not unclassified.empty else 0.0
+    technical_difference = total - sum_lines - unclassified_value
     summary = {
         "total": total, "sum_lines": sum_lines, "difference": total - sum_lines,
+        "technical_difference": technical_difference,
         "rows": int(len(period)), "unclassified_rows": int(len(unclassified)),
-        "unclassified_value": float(unclassified["_VALOR"].sum()) if not unclassified.empty else 0.0,
-        "fallback_value": float(period.loc[period.get("_CRITERIO_LINHA", "") != "Gerente oficial", "_VALOR"].sum()) if "_CRITERIO_LINHA" in period.columns else 0.0,
+        "unclassified_value": unclassified_value,
+        "fallback_value": float(period.loc[period.get("_CRITERIO_LINHA", "") == "Segmento / produto (gerente ausente)", "_VALOR"].sum()) if "_CRITERIO_LINHA" in period.columns else 0.0,
+        "unmapped_manager_value": float(period.loc[period.get("_CRITERIO_LINHA", "") == "Gerente fora do mapa oficial", "_VALOR"].sum()) if "_CRITERIO_LINHA" in period.columns else 0.0,
     }
     return summary, by_line, by_manager, monthly
 
@@ -3848,7 +3864,7 @@ elif page == "Produtos":
                 )
 
 # =========================================================
-# VALIDAÇÃO DOS DADOS — SOMENTE DIRETORIA
+# VALIDAÇÃO DOS DADOS — SOMENTE CONTROLADORIA
 # =========================================================
 elif page == "Validação dos dados" and can_validate:
     section_header("Validação dos dados", "Conciliação técnica", "Faturamento, linhas, datas e rateio sem alterar os indicadores")
@@ -3857,25 +3873,25 @@ elif page == "Validação dos dados" and can_validate:
         fat, start_month, end_month
     )
     tolerance = 0.01
-    reconciled = abs(float(validation["difference"])) <= tolerance
+    reconciled = abs(float(validation["technical_difference"])) <= tolerance
 
     a1, a2, a3, a4 = st.columns(4)
     with a1: card("Faturamento consolidado", brl(validation["total"]), "Soma de VALOR BRUTO no período", BLUE)
-    with a2: card("Soma das quatro linhas", brl(validation["sum_lines"]), "Classificação canônica por gerente e contingência", NAVY)
-    with a3: card("Diferença da conciliação", brl(validation["difference"]), "Deve permanecer em zero", BLUE if reconciled else RED)
-    with a4: card("Faturamento por contingência", brl(validation["fallback_value"]), "Gerente vazio ou fora do mapa oficial", CYAN)
+    with a2: card("Quatro linhas oficiais", brl(validation["sum_lines"]), "Somente Celso, Amauri, Renato e Ronaldo", NAVY)
+    with a3: card("Outras gerências", brl(validation["unclassified_value"]), "Não incorporadas à linha de outro gestor", CYAN)
+    with a4: card("Diferença técnica", brl(validation["technical_difference"]), "Consolidado menos linhas oficiais e outras gerências", BLUE if reconciled else RED)
 
     if reconciled:
-        st.success("Faturamento consolidado conciliado integralmente com Microtech, Locação, Vendas e Endoscopia.")
+        st.success("Faturamento conciliado: consolidado = quatro linhas oficiais + outras gerências.")
     else:
         st.error(
-            f"Há {brl(validation['difference'])} sem conciliação e "
-            f"{validation['unclassified_rows']} linha(s) não classificada(s)."
+            f"Permanece uma diferença técnica de {brl(validation['technical_difference'])}. "
+            "Revise valores, competência e classificação das linhas."
         )
 
     v1, v2 = st.columns([1.15, 1])
     with v1:
-        section_header("Faturamento por linha", badge="2026")
+        section_header("Faturamento por linha oficial", badge="2026")
         view = validation_lines.copy()
         for col in ["Faturamento", "Via contingência"]:
             view[col] = view[col].map(brl)
@@ -3891,7 +3907,7 @@ elif page == "Validação dos dados" and can_validate:
 
     section_header("Conciliação mensal", badge=period_text)
     month_view = validation_monthly.copy()
-    for col in ["Consolidado", "Soma das linhas", "Diferença"]:
+    for col in ["Consolidado", "Quatro linhas oficiais", "Outras gerências", "Diferença técnica"]:
         month_view[col] = month_view[col].map(brl)
     clean_table(month_view, height=300)
 
