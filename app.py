@@ -1531,6 +1531,608 @@ def scoped_data(scope: str, fat: pd.DataFrame, receitas: pd.DataFrame, custos: p
         i = inad[inad["_LINHA"] == scope].copy() if inad is not None else None
     return f, r, c, i
 
+def build_business_performance_pdf(
+    *,
+    scope_choice: str,
+    user: dict[str, str],
+    start_month: pd.Period,
+    end_month: pd.Period,
+    fat: pd.DataFrame,
+    metas: pd.DataFrame,
+    metas_g: pd.DataFrame,
+    receitas: pd.DataFrame,
+    despesas: pd.DataFrame,
+    custos: pd.DataFrame,
+    performance: pd.DataFrame,
+    inad: pd.DataFrame | None,
+    company_monthly: pd.DataFrame,
+    company_totals: dict[str, float],
+    line_monthly: pd.DataFrame | None,
+    line_totals: dict[str, float] | None,
+    commercial_monthly: pd.DataFrame,
+    commercial_totals: dict[str, float],
+    lines_table: pd.DataFrame,
+    fat_scope: pd.DataFrame,
+    rec_scope: pd.DataFrame,
+    cost_scope: pd.DataFrame,
+    inad_scope: pd.DataFrame | None,
+) -> bytes:
+    """Gera um relatório PDF paginado com o compilado de todas as áreas do app."""
+    try:
+        from reportlab.graphics.shapes import Drawing, Rect, String, Line
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import (
+            SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle,
+            KeepTogether, HRFlowable,
+        )
+    except ImportError as exc:
+        raise RuntimeError("A biblioteca reportlab não está instalada. Inclua reportlab no requirements.txt.") from exc
+
+    from datetime import datetime
+
+    navy = colors.HexColor(NAVY)
+    navy_2 = colors.HexColor(NAVY_2)
+    blue = colors.HexColor(BLUE)
+    cyan = colors.HexColor(CYAN)
+    red = colors.HexColor(RED)
+    gray = colors.HexColor(GRAY)
+    light = colors.HexColor("#F4F7FA")
+    border = colors.HexColor("#DCE6EF")
+    white = colors.white
+
+    def txt(value: object) -> str:
+        value = "" if value is None else str(value)
+        return (
+            value.replace("–", "-").replace("—", "-").replace("•", "-")
+            .replace(" ", " ").replace(" ", " ")
+        )
+
+    def money(value: float) -> str:
+        return brl(float(value or 0))
+
+    def percent(value: float) -> str:
+        return pct(float(value or 0))
+
+    def number(value: float, decimals: int = 0) -> str:
+        return f"{float(value or 0):,.{decimals}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    output = io.BytesIO()
+    page_size = landscape(A4)
+    doc = SimpleDocTemplate(
+        output,
+        pagesize=page_size,
+        leftMargin=14 * mm,
+        rightMargin=14 * mm,
+        topMargin=15 * mm,
+        bottomMargin=13 * mm,
+        title="First Intelligence | Business Performance",
+        author="First Medical - Controladoria",
+        subject=f"Relatório gerencial de {month_label(start_month)} a {month_label(end_month)}",
+    )
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(
+        name="ReportTitle", parent=styles["Title"], fontName="Helvetica-Bold",
+        fontSize=25, leading=29, textColor=navy, spaceAfter=8,
+    ))
+    styles.add(ParagraphStyle(
+        name="ReportSubtitle", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=10, leading=14, textColor=gray, spaceAfter=5,
+    ))
+    styles.add(ParagraphStyle(
+        name="SectionTitle", parent=styles["Heading1"], fontName="Helvetica-Bold",
+        fontSize=16, leading=19, textColor=navy, spaceAfter=6,
+    ))
+    styles.add(ParagraphStyle(
+        name="SectionNote", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=8.5, leading=12, textColor=gray, spaceAfter=9,
+    ))
+    styles.add(ParagraphStyle(
+        name="BodySmall", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=8, leading=11, textColor=colors.HexColor("#344054"),
+    ))
+    styles.add(ParagraphStyle(
+        name="BodyTiny", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=7, leading=9, textColor=colors.HexColor("#344054"),
+    ))
+    styles.add(ParagraphStyle(
+        name="MetricLabel", parent=styles["Normal"], fontName="Helvetica-Bold",
+        fontSize=6.7, leading=8, textColor=gray, spaceAfter=4,
+    ))
+    styles.add(ParagraphStyle(
+        name="MetricValue", parent=styles["Normal"], fontName="Helvetica-Bold",
+        fontSize=13.2, leading=15, textColor=navy,
+    ))
+    styles.add(ParagraphStyle(
+        name="TableHead", parent=styles["Normal"], fontName="Helvetica-Bold",
+        fontSize=7, leading=8.5, textColor=white, alignment=TA_LEFT,
+    ))
+    styles.add(ParagraphStyle(
+        name="TableCell", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=6.8, leading=8.4, textColor=colors.HexColor("#344054"),
+    ))
+    styles.add(ParagraphStyle(
+        name="TableCellRight", parent=styles["TableCell"], alignment=TA_RIGHT,
+    ))
+
+    def P(value: object, style: str = "BodySmall") -> Paragraph:
+        safe = html.escape(txt(value)).replace("\n", "<br/>")
+        return Paragraph(safe, styles[style])
+
+    def page_header_footer(canvas, _doc):
+        canvas.saveState()
+        w, h = page_size
+        canvas.setFillColor(navy)
+        canvas.setFont("Helvetica-Bold", 8)
+        canvas.drawString(doc.leftMargin, h - 9 * mm, "FIRST INTELLIGENCE | BUSINESS PERFORMANCE")
+        canvas.setStrokeColor(border)
+        canvas.setLineWidth(.5)
+        canvas.line(doc.leftMargin, h - 10.5 * mm, w - doc.rightMargin, h - 10.5 * mm)
+        canvas.setFillColor(gray)
+        canvas.setFont("Helvetica", 7)
+        footer = f"{line_label(scope_choice)} | {month_label(start_month)} a {month_label(end_month)}"
+        canvas.drawString(doc.leftMargin, 7 * mm, footer)
+        canvas.drawRightString(w - doc.rightMargin, 7 * mm, f"Página {canvas.getPageNumber()}")
+        canvas.restoreState()
+
+    def section(title: str, note: str = "") -> list:
+        elements = [P(title, "SectionTitle")]
+        if note:
+            elements.append(P(note, "SectionNote"))
+        elements.append(HRFlowable(width="100%", thickness=.7, color=border, spaceAfter=8))
+        return elements
+
+    def metric_grid(items: list[tuple[str, str]], columns: int = 4) -> Table:
+        cells = []
+        for label, value in items:
+            cells.append([P(label.upper(), "MetricLabel"), Spacer(1, 2), P(value, "MetricValue")])
+        while len(cells) % columns:
+            cells.append([P("", "MetricLabel"), P("", "MetricValue")])
+        rows = [cells[i:i + columns] for i in range(0, len(cells), columns)]
+        table = Table(rows, colWidths=[doc.width / columns] * columns, hAlign="LEFT")
+        style = [
+            ("BACKGROUND", (0, 0), (-1, -1), white),
+            ("BOX", (0, 0), (-1, -1), .65, border),
+            ("INNERGRID", (0, 0), (-1, -1), .35, border),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 9),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]
+        table.setStyle(TableStyle(style))
+        return table
+
+    def data_table(
+        headers: list[str], rows: list[list[object]], widths: list[float] | None = None,
+        right_cols: set[int] | None = None, max_rows: int | None = None,
+    ) -> Table:
+        right_cols = right_cols or set()
+        if max_rows is not None:
+            rows = rows[:max_rows]
+        if widths is None:
+            widths = [doc.width / max(len(headers), 1)] * len(headers)
+        total_width = sum(widths)
+        if total_width > doc.width:
+            scale = doc.width / total_width
+            widths = [w * scale for w in widths]
+        content = [[P(h, "TableHead") for h in headers]]
+        for row in rows:
+            formatted = []
+            for idx, value in enumerate(row):
+                formatted.append(P(value, "TableCellRight" if idx in right_cols else "TableCell"))
+            content.append(formatted)
+        table = Table(content, colWidths=widths, repeatRows=1, hAlign="LEFT", splitByRow=True)
+        commands = [
+            ("BACKGROUND", (0, 0), (-1, 0), navy_2),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, 0), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+            ("TOPPADDING", (0, 1), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+            ("LINEBELOW", (0, 0), (-1, 0), .7, navy),
+        ]
+        for row_idx in range(1, len(content)):
+            if row_idx % 2 == 0:
+                commands.append(("BACKGROUND", (0, row_idx), (-1, row_idx), light))
+            commands.append(("LINEBELOW", (0, row_idx), (-1, row_idx), .25, border))
+        for col_idx in right_cols:
+            commands.append(("ALIGN", (col_idx, 1), (col_idx, -1), "RIGHT"))
+        table.setStyle(TableStyle(commands))
+        return table
+
+    def vbar_chart(
+        categories: list[str], series: list[tuple[str, list[float], object]], title: str,
+        width: float | None = None, height: float = 205,
+    ) -> Drawing:
+        width = float(width or doc.width)
+        d = Drawing(width, height)
+        d.add(String(0, height - 13, txt(title), fontName="Helvetica-Bold", fontSize=10.5, fillColor=navy))
+        if not categories or not series:
+            d.add(String(0, height / 2, "Sem dados para o período.", fontName="Helvetica", fontSize=8, fillColor=gray))
+            return d
+        values = [max(float(v), 0.0) for _, vals, _ in series for v in vals]
+        max_value = max(values) if values else 0
+        if max_value <= 0:
+            d.add(String(0, height / 2, "Sem valores positivos para exibição.", fontName="Helvetica", fontSize=8, fillColor=gray))
+            return d
+        left = 18
+        bottom = 34
+        chart_width = width - 28
+        chart_height = height - 67
+        group_width = chart_width / max(len(categories), 1)
+        series_count = len(series)
+        bar_width = min(24, max(7, group_width / (series_count + 1.5)))
+        for idx, category in enumerate(categories):
+            center = left + group_width * (idx + .5)
+            d.add(String(center, 9, txt(short_label(category, 15)), textAnchor="middle", fontName="Helvetica", fontSize=6.5, fillColor=gray))
+            for s_idx, (_name, vals, color) in enumerate(series):
+                value = max(float(vals[idx]), 0.0) if idx < len(vals) else 0.0
+                bar_h = chart_height * value / max_value
+                x = center - (series_count * bar_width) / 2 + s_idx * bar_width
+                d.add(Rect(x, bottom, bar_width - 2, bar_h, fillColor=color, strokeColor=None))
+                if value > 0:
+                    d.add(String(x + (bar_width - 2) / 2, bottom + bar_h + 3, compact_money(value), textAnchor="middle", fontName="Helvetica", fontSize=5.8, fillColor=navy))
+        legend_x = max(0, width - 105 * series_count)
+        for idx, (name, _vals, color) in enumerate(series):
+            lx = legend_x + idx * 105
+            d.add(Rect(lx, height - 14, 7, 7, fillColor=color, strokeColor=None))
+            d.add(String(lx + 11, height - 13, txt(name), fontName="Helvetica", fontSize=6.6, fillColor=gray))
+        return d
+
+    def hbar_chart(
+        categories: list[str], series: list[tuple[str, list[float], object]], title: str,
+        width: float | None = None, row_height: float = 26,
+    ) -> Drawing:
+        width = float(width or doc.width)
+        count = max(len(categories), 1)
+        height = 46 + count * row_height
+        d = Drawing(width, height)
+        d.add(String(0, height - 13, txt(title), fontName="Helvetica-Bold", fontSize=10.5, fillColor=navy))
+        if not categories or not series:
+            d.add(String(0, height / 2, "Sem dados para o período.", fontName="Helvetica", fontSize=8, fillColor=gray))
+            return d
+        max_value = max([max(float(v), 0.0) for _n, vals, _c in series for v in vals] or [0])
+        if max_value <= 0:
+            return d
+        label_width = 150
+        plot_width = width - label_width - 60
+        series_count = len(series)
+        bar_h = min(8, (row_height - 5) / max(series_count, 1))
+        for idx, category in enumerate(categories):
+            y_top = height - 34 - idx * row_height
+            d.add(String(label_width - 7, y_top - 3, txt(short_label(category, 31)), textAnchor="end", fontName="Helvetica", fontSize=6.8, fillColor=gray))
+            for s_idx, (_name, vals, color) in enumerate(series):
+                value = max(float(vals[idx]), 0.0) if idx < len(vals) else 0.0
+                y = y_top - 7 - s_idx * (bar_h + 3)
+                bar_w = plot_width * value / max_value
+                d.add(Rect(label_width, y, bar_w, bar_h, fillColor=color, strokeColor=None))
+                if value > 0:
+                    d.add(String(label_width + bar_w + 4, y + 1, compact_money(value), fontName="Helvetica", fontSize=6.2, fillColor=navy if color != red else red))
+        legend_x = max(0, width - 105 * series_count)
+        for idx, (name, _vals, color) in enumerate(series):
+            lx = legend_x + idx * 105
+            d.add(Rect(lx, height - 14, 7, 7, fillColor=color, strokeColor=None))
+            d.add(String(lx + 11, height - 13, txt(name), fontName="Helvetica", fontSize=6.6, fillColor=gray))
+        return d
+
+    story: list = []
+    period_text = f"{month_label(start_month)} a {month_label(end_month)}"
+    scope_text = line_label(scope_choice)
+    generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    # Capa e visão executiva
+    story.extend([
+        Spacer(1, 10 * mm),
+        P("FIRST INTELLIGENCE", "ReportSubtitle"),
+        P("Business Performance", "ReportTitle"),
+        P(f"Relatório gerencial completo | {scope_text} | {period_text}", "ReportSubtitle"),
+        P(f"Perfil: {user.get('nome', 'Usuário')} | Gerado em {generated_at}", "ReportSubtitle"),
+        Spacer(1, 7 * mm),
+    ])
+
+    overdue_total = float(inad_scope["_VALOR_VENCIDO"].sum()) if inad_scope is not None and not inad_scope.empty else 0.0
+    if scope_choice == "CONSOLIDADO":
+        cover_metrics = [
+            ("Receitas operacionais recebidas", money(company_totals.get("Receitas Operacionais", 0))),
+            ("Saídas operacionais pagas", money(company_totals.get("Saídas Operacionais", 0))),
+            ("Resultado operacional de caixa", money(company_totals.get("Resultado Operacional de Caixa", 0))),
+            ("Margem operacional de caixa", percent(company_totals.get("Margem de Caixa", 0))),
+            ("Faturamento realizado", money(commercial_totals.get("Faturamento", 0))),
+            ("Atingimento da meta", percent(commercial_totals.get("Atingimento", 0))),
+            ("EBITDA gerencial de caixa", money(company_totals.get("EBITDA Gerencial de Caixa", 0))),
+            ("Inadimplência", money(overdue_total)),
+        ]
+    else:
+        lt = line_totals or {}
+        cover_metrics = [
+            ("Receitas diretas recebidas", money(lt.get("Receitas Recebidas", 0))),
+            ("Custos diretos pagos", money(lt.get("Custos Diretos Pagos", 0))),
+            ("Resultado direto de caixa", money(lt.get("Resultado Direto de Caixa", 0))),
+            ("Margem direta de caixa", percent(lt.get("Margem Direta de Caixa", 0))),
+            ("Faturamento realizado", money(commercial_totals.get("Faturamento", 0))),
+            ("Atingimento da meta", percent(commercial_totals.get("Atingimento", 0))),
+            ("Conversão em caixa", percent(lt.get("Conversão em Caixa", 0))),
+            ("Inadimplência", money(overdue_total)),
+        ]
+    story.append(metric_grid(cover_metrics, 4))
+    story.append(Spacer(1, 8 * mm))
+    story.append(P(
+        "O relatório reúne, em um único arquivo, Dashboard, Desempenho e Metas, Linhas de Negócio, "
+        "Recebimentos e Inadimplência, Clientes, Produtos e Centro de Custos. Os cálculos respeitam o "
+        "período, o escopo e as permissões do perfil selecionado no aplicativo.",
+        "SectionNote",
+    ))
+
+    # 1 - Dashboard
+    story.append(PageBreak())
+    story.extend(section("1. Dashboard", "Visão integrada dos principais indicadores e da evolução mensal."))
+    monthly = company_monthly if scope_choice == "CONSOLIDADO" else (line_monthly if line_monthly is not None else pd.DataFrame())
+    if scope_choice == "CONSOLIDADO":
+        rev_col, exp_col, result_col = "Receitas Operacionais", "Saídas Operacionais", "Resultado Operacional de Caixa"
+    else:
+        rev_col, exp_col, result_col = "Receitas Recebidas", "Custos Diretos Pagos", "Resultado Direto de Caixa"
+    if not monthly.empty:
+        story.append(vbar_chart(
+            monthly["Mês Texto"].tolist(),
+            [("Receitas", monthly[rev_col].tolist(), blue), ("Despesas", monthly[exp_col].tolist(), red)],
+            "Receitas e despesas por mês",
+        ))
+        dashboard_rows = []
+        for _, row in monthly.iterrows():
+            dashboard_rows.append([
+                row["Mês Texto"], money(row.get(rev_col, 0)), money(row.get(exp_col, 0)),
+                money(row.get(result_col, 0)), percent(row.get("Conversão em Caixa", 0)),
+            ])
+        story.append(data_table(
+            ["Mês", "Receitas", "Despesas", "Resultado", "Conversão"], dashboard_rows,
+            [65, 125, 125, 125, 90], {1, 2, 3, 4},
+        ))
+
+    # 2 - Desempenho e metas
+    story.append(PageBreak())
+    story.extend(section("2. Desempenho e metas", "Realizado comercial, meta, desvio e projeção anual."))
+    performance_metrics = [
+        ("Faturamento realizado", money(commercial_totals.get("Faturamento", 0))),
+        ("Meta acumulada", money(commercial_totals.get("Meta", 0))),
+        ("Atingimento", percent(commercial_totals.get("Atingimento", 0))),
+        ("Desvio", money(commercial_totals.get("Desvio", 0))),
+        ("Média mensal", money(commercial_totals.get("Média Mensal", 0))),
+        ("Meta anual", money(commercial_totals.get("Meta Anual", 0))),
+        ("Projeção anual", money(commercial_totals.get("Projeção Anual", 0))),
+        ("Atingimento projetado", percent(commercial_totals.get("Atingimento Projetado", 0))),
+    ]
+    story.append(metric_grid(performance_metrics, 4))
+    story.append(Spacer(1, 5 * mm))
+    if not commercial_monthly.empty:
+        story.append(vbar_chart(
+            commercial_monthly["Mês Texto"].tolist(),
+            [("Faturamento", commercial_monthly["Faturamento"].tolist(), blue), ("Meta", commercial_monthly["Meta"].tolist(), navy)],
+            "Faturamento x meta mensal",
+        ))
+        perf_rows = [[
+            r["Mês Texto"], money(r["Faturamento"]), money(r["Meta"]), money(r["Desvio"]), percent(r["Atingimento"])
+        ] for _, r in commercial_monthly.iterrows()]
+        story.append(data_table(
+            ["Mês", "Faturamento", "Meta", "Desvio", "Atingimento"], perf_rows,
+            [65, 130, 130, 130, 90], {1, 2, 3, 4},
+        ))
+
+    sellers = seller_performance(fat, metas, start_month, end_month, scope_choice).head(15)
+    if not sellers.empty:
+        story.append(Spacer(1, 5 * mm))
+        story.append(P("Desempenho da equipe", "SectionTitle"))
+        seller_rows = [[
+            r["Vendedor"], money(r["Faturamento"]), money(r["Meta"]), percent(r["Atingimento"]), money(r["Desvio"]), r["Status"]
+        ] for _, r in sellers.iterrows()]
+        story.append(data_table(
+            ["Vendedor / representante", "Faturamento", "Meta", "Atingimento", "Desvio", "Status"], seller_rows,
+            [200, 105, 105, 80, 105, 100], {1, 2, 3, 4},
+        ))
+
+    # 3 - Linhas de negócio / Resultado da linha
+    story.append(PageBreak())
+    if scope_choice == "CONSOLIDADO":
+        story.extend(section("3. Linhas de negócio", "Receitas e custos diretamente identificados na coluna Centro de Custos, sem rateio."))
+        line_rows = []
+        for _, r in lines_table.iterrows():
+            line_rows.append([
+                r["Linha"], money(r["Receitas Recebidas"]), money(r["Custos Diretos Pagos"]),
+                money(r["Resultado Direto de Caixa"]), percent(r["Margem Direta de Caixa"]),
+                money(r["Faturamento"]), percent(r["Atingimento da Meta"]), money(r["Inadimplência"]),
+            ])
+        story.append(vbar_chart(
+            lines_table["Linha"].tolist(),
+            [("Receitas", lines_table["Receitas Recebidas"].tolist(), blue), ("Despesas", lines_table["Custos Diretos Pagos"].tolist(), red)],
+            "Receitas x despesas por linha",
+        ))
+        story.append(data_table(
+            ["Linha", "Receitas", "Despesas", "Resultado", "Margem", "Faturamento", "Meta %", "Inadimplência"],
+            line_rows, [82, 100, 100, 100, 60, 100, 60, 100], {1, 2, 3, 4, 5, 6, 7},
+        ))
+    else:
+        story.extend(section("3. Resultado da linha", "Visão mensal restrita à linha do perfil selecionado."))
+        if line_monthly is not None and not line_monthly.empty:
+            line_rows = [[
+                r["Mês Texto"], money(r["Faturamento"]), money(r["Receitas Recebidas"]), money(r["Custos Diretos Pagos"]),
+                money(r["Resultado Direto de Caixa"]), percent(r["Margem Direta de Caixa"]), percent(r["Conversão em Caixa"]),
+            ] for _, r in line_monthly.iterrows()]
+            story.append(data_table(
+                ["Mês", "Faturamento", "Receitas", "Custos", "Resultado", "Margem", "Conversão"], line_rows,
+                [60, 105, 105, 105, 105, 72, 72], {1, 2, 3, 4, 5, 6},
+            ))
+
+    # 4 - Recebimentos e inadimplência
+    story.append(PageBreak())
+    story.extend(section("4. Recebimentos e inadimplência", "Conversão financeira, aging e maiores saldos vencidos."))
+    if scope_choice == "CONSOLIDADO":
+        receipt_metrics = [
+            ("Recebimento previsto", money(company_totals.get("Recebimento Previsto", 0))),
+            ("Recebimento realizado", money(company_totals.get("Recebimento Realizado", 0))),
+            ("Performance de recebimento", percent(company_totals.get("Performance de Recebimento", 0))),
+            ("Inadimplência", money(overdue_total)),
+        ]
+    else:
+        receipt_metrics = [
+            ("Receitas recebidas", money((line_totals or {}).get("Receitas Recebidas", 0))),
+            ("Faturamento", money(commercial_totals.get("Faturamento", 0))),
+            ("Conversão em caixa", percent((line_totals or {}).get("Conversão em Caixa", 0))),
+            ("Inadimplência", money(overdue_total)),
+        ]
+    story.append(metric_grid(receipt_metrics, 4))
+    story.append(Spacer(1, 5 * mm))
+    if inad_scope is not None and not inad_scope.empty:
+        aging_order = ["Até 30 dias", "31 a 60 dias", "61 a 90 dias", "Acima de 90 dias"]
+        aging = inad_scope.groupby("_FAIXA", observed=False)["_VALOR_VENCIDO"].sum().reindex(aging_order, fill_value=0)
+        story.append(vbar_chart(
+            aging_order, [("Saldo vencido", aging.tolist(), blue)], "Aging da inadimplência", height=190,
+        ))
+        aging_rows = [[label, money(value), percent(safe_div(value, overdue_total))] for label, value in aging.items()]
+        story.append(data_table(["Faixa", "Saldo vencido", "Participação"], aging_rows, [180, 140, 100], {1, 2}))
+        top_debtors = (
+            inad_scope.groupby("_CLIENTE", as_index=False)["_VALOR_VENCIDO"].sum()
+            .sort_values("_VALOR_VENCIDO", ascending=False).head(15)
+        )
+        debtor_rows = [[r["_CLIENTE"], money(r["_VALOR_VENCIDO"]), percent(safe_div(r["_VALOR_VENCIDO"], overdue_total))] for _, r in top_debtors.iterrows()]
+        story.append(Spacer(1, 5 * mm))
+        story.append(P("Maiores saldos vencidos", "SectionTitle"))
+        story.append(data_table(["Cliente", "Saldo vencido", "Participação"], debtor_rows, [350, 130, 100], {1, 2}))
+    else:
+        story.append(P("A base de inadimplência não possui registros para o período e escopo selecionados.", "SectionNote"))
+
+    # 5 - Clientes
+    story.append(PageBreak())
+    story.extend(section("5. Clientes", "Principais clientes por faturamento e recebimentos."))
+    billing_client_col = "NOME DO CLIENTE" if "NOME DO CLIENTE" in fat_scope.columns else optional_col(fat_scope, ["CLIENTE", "Cliente", "RAZÃO SOCIAL", "Razao Social"])
+    receipt_client_col = "Cliente" if "Cliente" in rec_scope.columns else optional_col(rec_scope, ["CLIENTE", "Nome do Cliente"])
+    if billing_client_col and not fat_scope.empty:
+        top_billing = (
+            fat_scope.groupby(billing_client_col, as_index=False)["_VALOR"].sum()
+            .sort_values("_VALOR", ascending=False).head(15)
+        )
+        total_billing = float(fat_scope["_VALOR"].sum())
+        rows = [[r[billing_client_col], money(r["_VALOR"]), percent(safe_div(r["_VALOR"], total_billing))] for _, r in top_billing.iterrows()]
+        story.append(P("Clientes por faturamento", "SectionTitle"))
+        story.append(data_table(["Cliente", "Faturamento", "Participação"], rows, [350, 130, 100], {1, 2}))
+    if receipt_client_col and not rec_scope.empty:
+        story.append(Spacer(1, 5 * mm))
+        top_receipts = (
+            rec_scope.groupby(receipt_client_col, as_index=False)["_VALOR"].sum()
+            .sort_values("_VALOR", ascending=False).head(15)
+        )
+        total_receipts = float(rec_scope["_VALOR"].sum())
+        rows = [[r[receipt_client_col], money(r["_VALOR"]), percent(safe_div(r["_VALOR"], total_receipts))] for _, r in top_receipts.iterrows()]
+        story.append(P("Clientes por recebimento", "SectionTitle"))
+        story.append(data_table(["Cliente", "Recebimentos", "Participação"], rows, [350, 130, 100], {1, 2}))
+
+    # 6 - Produtos
+    story.append(PageBreak())
+    story.extend(section("6. Produtos", "Faturamento, volume, preço médio e concentração."))
+    product_col = optional_col(fat_scope, ["PRODUTO", "DESCRIÇÃO", "LINHA DE PRODUTO", "ITEM"])
+    qty_col = optional_col(fat_scope, ["QUANTIDADE", "QTD", "QTDE", "QTD FATURADA", "QUANTIDADE FATURADA"])
+    product_client_col = billing_client_col
+    if product_col and not fat_scope.empty:
+        prod = fat_scope.copy()
+        prod["_PRODUTO_REL"] = prod[product_col].fillna("Não informado").astype(str).str.strip()
+        prod["_QTD_REL"] = to_number(prod[qty_col]) if qty_col else 1.0
+        prod.loc[prod["_QTD_REL"] <= 0, "_QTD_REL"] = 1.0
+        agg = {"Faturamento": ("_VALOR", "sum"), "Quantidade": ("_QTD_REL", "sum")}
+        if product_client_col:
+            agg["Clientes"] = (product_client_col, "nunique")
+        products = prod.groupby("_PRODUTO_REL", as_index=False).agg(**agg)
+        if "Clientes" not in products:
+            products["Clientes"] = 0
+        products["Preço médio"] = np.where(products["Quantidade"] != 0, products["Faturamento"] / products["Quantidade"], 0)
+        total_products = float(products["Faturamento"].sum())
+        products["Participação"] = np.where(total_products != 0, products["Faturamento"] / total_products, 0)
+        products = products.sort_values("Faturamento", ascending=False).head(20)
+        product_rows = [[
+            r["_PRODUTO_REL"], money(r["Faturamento"]), percent(r["Participação"]), number(r["Quantidade"]), money(r["Preço médio"]), number(r["Clientes"])
+        ] for _, r in products.iterrows()]
+        story.append(hbar_chart(
+            products.head(10)["_PRODUTO_REL"].tolist(),
+            [("Faturamento", products.head(10)["Faturamento"].tolist(), blue)],
+            "Top produtos por faturamento",
+        ))
+        story.append(data_table(
+            ["Produto", "Faturamento", "Participação", "Quantidade", "Preço médio", "Clientes"], product_rows,
+            [275, 105, 75, 70, 100, 55], {1, 2, 3, 4, 5},
+        ))
+    else:
+        story.append(P("A base de faturamento não possui uma coluna de produto reconhecida para este escopo.", "SectionNote"))
+
+    # 7 - Centro de custos
+    story.append(PageBreak())
+    story.extend(section("7. Centro de custos", "Receitas e despesas operacionais e não operacionais, sempre pela coluna Centro de Custos."))
+    cc = period_filter(custos, start_month, end_month).copy()
+    if scope_choice != "CONSOLIDADO":
+        cc = cc[cc["_CC_N"] == scope_choice].copy()
+    cc["Movimento"] = np.where(cc["_EMPRESA_N"] == "RECEITA", "Receita", "Despesa")
+    cc["Classificação"] = np.where(cc["_GRUPO_N"].str.contains("NAO OPERACIONAIS", na=False), "Não operacional", "Operacional")
+    cc["Departamento"] = cc["CENTRO DE CUSTOS"].fillna("Não informado").astype(str).str.strip()
+    if not cc.empty:
+        cc_revenue = float(cc.loc[cc["Movimento"] == "Receita", "_VALOR"].sum())
+        cc_expense = float(cc.loc[cc["Movimento"] == "Despesa", "_VALOR"].sum())
+        cc_metrics = [
+            ("Receitas", money(cc_revenue)),
+            ("Despesas", money(cc_expense)),
+            ("Saldo", money(cc_revenue - cc_expense)),
+            ("Centros de custos", number(cc["Departamento"].nunique())),
+        ]
+        story.append(metric_grid(cc_metrics, 4))
+        story.append(Spacer(1, 5 * mm))
+        dep = (
+            cc.groupby(["Departamento", "Movimento"], as_index=False)["_VALOR"].sum()
+            .pivot(index="Departamento", columns="Movimento", values="_VALOR").fillna(0).reset_index()
+        )
+        for col in ["Receita", "Despesa"]:
+            if col not in dep:
+                dep[col] = 0.0
+        dep["Saldo"] = dep["Receita"] - dep["Despesa"]
+        dep["Movimentação"] = dep["Receita"] + dep["Despesa"]
+        dep = dep.sort_values("Movimentação", ascending=False).head(15)
+        story.append(hbar_chart(
+            dep["Departamento"].tolist(),
+            [("Receitas", dep["Receita"].tolist(), blue), ("Despesas", dep["Despesa"].tolist(), red)],
+            "Receitas e despesas por departamento",
+        ))
+        dep_rows = [[r["Departamento"], money(r["Receita"]), money(r["Despesa"]), money(r["Saldo"])] for _, r in dep.iterrows()]
+        story.append(data_table(["Departamento", "Receitas", "Despesas", "Saldo"], dep_rows, [300, 125, 125, 125], {1, 2, 3}))
+
+        story.append(Spacer(1, 5 * mm))
+        exp_nature = (
+            cc[cc["Movimento"] == "Despesa"].groupby("PAI", as_index=False)["_VALOR"].sum()
+            .sort_values("_VALOR", ascending=False).head(20)
+        )
+        if not exp_nature.empty:
+            story.append(P("Principais naturezas de despesa", "SectionTitle"))
+            nature_rows = [[r["PAI"], money(r["_VALOR"]), percent(safe_div(r["_VALOR"], cc_expense))] for _, r in exp_nature.iterrows()]
+            story.append(data_table(["Natureza", "Valor", "Participação"], nature_rows, [350, 130, 100], {1, 2}))
+    else:
+        story.append(P("Não há lançamentos de Centro de Custos para o período e escopo selecionados.", "SectionNote"))
+
+    # Notas metodológicas
+    story.append(PageBreak())
+    story.extend(section("Notas metodológicas", "Critérios usados na elaboração do relatório."))
+    notes = [
+        ["Regime de análise", "Os indicadores financeiros principais são gerenciais em regime de caixa."],
+        ["Linhas de negócio", "Receitas e despesas diretas são determinadas exclusivamente pela coluna Centro de Custos. A coluna de rateio não é utilizada."],
+        ["Faturamento e metas", "São indicadores comerciais por competência e aparecem separados dos resultados financeiros realizados."],
+        ["Inadimplência", "O saldo é obtido do relatório ativo do CRM de cobrança, conforme o perfil e a linha atribuídos."],
+        ["Margem de contribuição de caixa", "Receitas operacionais recebidas menos saídas variáveis pagas, dividido pelas receitas operacionais recebidas."],
+        ["Limitação", "O relatório gerencial não substitui demonstrações contábeis oficiais ou conciliações do balancete."],
+    ]
+    story.append(data_table(["Tema", "Critério"], notes, [175, 555], set()))
+
+    doc.build(story, onFirstPage=page_header_footer, onLaterPages=page_header_footer)
+    return output.getvalue()
+
 
 # =========================================================
 # FONTES, USUÁRIO E FILTROS
@@ -1679,6 +2281,46 @@ commercial_monthly = commercial_performance_monthly(fat, metas_g, start_month, e
 commercial_totals = commercial_performance_totals(commercial_monthly, metas_g, scope_choice, end_month.year)
 lines_table = line_summary(fat, metas_g, receitas, custos, start_month, end_month, inad)
 fat_scope, rec_scope, cost_scope, inad_scope = scoped_data(scope_choice, fat, receitas, custos, inad, start_month, end_month)
+
+report_key = f"{base_id}|{rev_id}|{inad_id}|{scope_choice}|{start_month}|{end_month}|{user.get('nome', '')}"
+if st.session_state.get("business_pdf_key") != report_key:
+    st.session_state.pop("business_pdf_bytes", None)
+    st.session_state.pop("business_pdf_name", None)
+    st.session_state["business_pdf_key"] = report_key
+
+with st.sidebar:
+    st.markdown("#### Relatório completo")
+    st.caption("Compilado de todos os menus, respeitando o período, o escopo e o perfil de acesso.")
+    if st.button("Gerar PDF para impressão", width="stretch", key="generate_complete_pdf"):
+        try:
+            with st.spinner("Montando relatório paginado..."):
+                pdf_bytes = build_business_performance_pdf(
+                    scope_choice=scope_choice, user=user, start_month=start_month, end_month=end_month,
+                    fat=fat, metas=metas, metas_g=metas_g, receitas=receitas, despesas=despesas,
+                    custos=custos, performance=performance, inad=inad,
+                    company_monthly=company_monthly, company_totals=company_totals,
+                    line_monthly=line_monthly, line_totals=line_totals,
+                    commercial_monthly=commercial_monthly, commercial_totals=commercial_totals,
+                    lines_table=lines_table, fat_scope=fat_scope, rec_scope=rec_scope,
+                    cost_scope=cost_scope, inad_scope=inad_scope,
+                )
+            scope_file = norm(scope_choice).lower().replace(" ", "_")
+            st.session_state["business_pdf_bytes"] = pdf_bytes
+            st.session_state["business_pdf_name"] = (
+                f"first_business_performance_{scope_file}_{start_month}_{end_month}.pdf"
+            )
+        except Exception as exc:
+            st.error(f"Não foi possível gerar o PDF: {exc}")
+
+    if st.session_state.get("business_pdf_bytes"):
+        st.download_button(
+            "Baixar relatório em PDF",
+            data=st.session_state["business_pdf_bytes"],
+            file_name=st.session_state.get("business_pdf_name", "first_business_performance.pdf"),
+            mime="application/pdf",
+            width="stretch",
+            key="download_complete_pdf",
+        )
 
 
 # =========================================================
