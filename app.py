@@ -751,14 +751,27 @@ def nature_key(value: object) -> str:
 
 
 def classify_billing_line(row: pd.Series) -> str:
-    fields = ["FORNECEDOR", "SEGMENTO", "LINHA DE PRODUTO", "PRODUTO", "DESCRIÇÃO", "Endoscopia?", "NOVA"]
+    """Classificação de contingência quando o gerente não pertence ao mapa oficial.
+
+    O segmento tem prioridade sobre palavras encontradas na descrição do produto. Isso
+    evita, por exemplo, que uma assistência técnica de Terapia Intensiva seja enviada
+    para Endoscopia apenas porque o equipamento possui alguma referência endoscópica.
+    """
+    segment = norm(row.get("SEGMENTO", ""))
+    nova = norm(row.get("NOVA", ""))
+    fields = ["FORNECEDOR", "LINHA DE PRODUTO", "PRODUTO", "DESCRIÇÃO", "Endoscopia?"]
     text = " ".join(norm(row.get(c, "")) for c in fields)
-    if "MICROTECH" in text or "MICRO TECH" in text:
+
+    if "MICROTECH" in segment or "MICRO TECH" in segment or "MICROTECH" in text or "MICRO TECH" in text:
         return "MICROTECH"
+    if "LOCACAO" in segment or "LOCACAO" in nova:
+        return "LOCACAO"
+    if "GASTROENDOSCOPIA" in segment or segment.startswith("ENDOSCOPIA"):
+        return "ENDOSCOPIA"
+    if "VENDAS" in segment or nova in {"VENDA", "SERVICO"}:
+        return "VENDAS"
     if norm(row.get("Endoscopia?")) == "SIM" or "ENDOSCOPIA" in text or "GASTROENDOSCOPIA" in text:
         return "ENDOSCOPIA"
-    if "LOCACAO" in norm(row.get("NOVA")) or "LOCACAO" in norm(row.get("SEGMENTO")):
-        return "LOCACAO"
     return "VENDAS"
 
 
@@ -793,12 +806,21 @@ def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     ]:
         if col in fat.columns:
             fat[col] = fat[col].fillna("Não informado").astype(str).str.strip()
+    # Uma única classificação canônica alimenta todas as telas. O gerente oficial
+    # prevalece; somente gerentes não mapeados ou vazios usam segmento/produto.
     fallback_line = fat.apply(classify_billing_line, axis=1)
+    fat["_LINHA_FALLBACK"] = fallback_line
     if "GERENTE" in fat.columns:
-        manager_line = fat["GERENTE"].map(norm).map(MANAGER_LINE_MAP)
+        fat["_GERENTE_N"] = fat["GERENTE"].map(norm)
+        manager_line = fat["_GERENTE_N"].map(MANAGER_LINE_MAP)
+        fat["_LINHA_GERENTE"] = manager_line.fillna("NAO CLASSIFICADA")
         fat["_LINHA"] = manager_line.where(manager_line.notna(), fallback_line)
+        fat["_CRITERIO_LINHA"] = np.where(manager_line.notna(), "Gerente oficial", "Segmento / produto")
     else:
+        fat["_GERENTE_N"] = "NAO INFORMADO"
+        fat["_LINHA_GERENTE"] = "NAO CLASSIFICADA"
         fat["_LINHA"] = fallback_line
+        fat["_CRITERIO_LINHA"] = "Segmento / produto"
     client_col = "NOME DO CLIENTE" if "NOME DO CLIENTE" in fat.columns else "CLIENTE"
     fat["_CLIENT_KEY"] = fat[client_col].map(client_key)
     fat["_TIPO_CAIXA"] = np.where(
@@ -818,7 +840,35 @@ def load_base_bi(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
             if c in df.columns:
                 df[c] = df[c].fillna("Não informado").astype(str).str.strip()
 
-    return {"faturamento": fat, "metas": metas, "metas_gerentes": metas_g, "usuarios": users, "sheet_states": states}
+    # Metadados para a página de validação. Não alteram nenhum cálculo.
+    valid_date = fat["_MES"].notna()
+    in_analysis_year = valid_date & fat["_MES"].map(lambda value: value.year if isinstance(value, pd.Period) else np.nan).eq(ANALYSIS_YEAR)
+    # Não eliminamos linhas repetidas: em locação, várias unidades podem ter dados
+    # comerciais idênticos. A validação destaca apenas ausências e valores atípicos.
+    zero_mask = fat["_VALOR"].eq(0)
+    negative_mask = fat["_VALOR"].lt(0)
+    note_col_audit = optional_col(fat, ["Nota Fiscal", "NOTA FISCAL", "NF"])
+    missing_note_mask = (
+        fat[note_col_audit].fillna("").astype(str).map(norm).isin(["", "NAO INFORMADO", "NAN"])
+        if note_col_audit else pd.Series(True, index=fat.index)
+    )
+    billing_audit = {
+        "date_column": date_col,
+        "value_column": value_col,
+        "rows_total": int(len(fat)),
+        "rows_without_month": int((~valid_date).sum()),
+        "rows_2026": int(in_analysis_year.sum()),
+        "value_2026": float(fat.loc[in_analysis_year, "_VALOR"].sum()),
+        "zero_value_rows_2026": int((zero_mask & in_analysis_year).sum()),
+        "negative_value_rows_2026": int((negative_mask & in_analysis_year).sum()),
+        "negative_value_2026": float(fat.loc[negative_mask & in_analysis_year, "_VALOR"].sum()),
+        "missing_note_rows_2026": int((missing_note_mask & in_analysis_year).sum()),
+    }
+
+    return {
+        "faturamento": fat, "metas": metas, "metas_gerentes": metas_g,
+        "usuarios": users, "sheet_states": states, "billing_audit": billing_audit,
+    }
 
 
 @st.cache_data(show_spinner=False)
@@ -985,7 +1035,7 @@ def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     receitas = read_excel_sheet(file_bytes, "Resumo Receitas")
     despesas = read_excel_sheet(file_bytes, "Resumo Despesas", usecols="A:N")
     mapping_raw = read_excel_raw(file_bytes, "Resumo Despesas", usecols="O:S")
-    custos = read_excel_sheet(file_bytes, "Centro de Custos", usecols="A:P")
+    custos = read_excel_sheet(file_bytes, "Centro de Custos")
     caixa = read_excel_sheet(file_bytes, "Caixa Operacional")
     receb = read_excel_sheet(file_bytes, "Performance Recebimento")
 
@@ -1015,9 +1065,29 @@ def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     despesas["_GRUPO_N"] = despesas["GRUPO"].map(norm)
     despesas = despesas[despesas["_MES"].notna() & despesas["_GRUPO_N"].isin(["SAIDAS OPERACIONAIS", "SAIDAS NAO OPERACIONAIS"])].copy()
 
-    custos["_MES"] = pd.to_datetime(custos[require_col(custos, ["MÊS"], "Centro de Custos")], errors="coerce").dt.to_period("M")
-    custos["_VALOR"] = to_number(custos[require_col(custos, ["Valor"], "Centro de Custos")])
-    for col in ["EMPRESA", "GRUPO", "SUBGRUPO", "PAI", "Categoria", "CENTRO DE CUSTOS", "CENTRO DE CUSTOS RATEAO", "Codigo-Nome do Fornecedor"]:
+    custos["_MES"] = pd.to_datetime(custos[require_col(custos, ["MÊS", "MES"], "Centro de Custos")], errors="coerce").dt.to_period("M")
+    custos["_VALOR"] = to_number(custos[require_col(custos, ["Valor", "VALOR"], "Centro de Custos")])
+
+    direct_cc_col = require_col(
+        custos, ["CENTRO DE CUSTOS", "CENTRO DE CUSTO", "CENTRO CUSTOS", "CC DIRETO"], "Centro de Custos"
+    )
+    if direct_cc_col != "CENTRO DE CUSTOS":
+        custos["CENTRO DE CUSTOS"] = custos[direct_cc_col]
+    rateio_col = optional_col(
+        custos, [
+            "CENTRO DE CUSTOS RATEAO", "CENTRO DE CUSTOS RATEADO",
+            "CENTRO DE CUSTOS RATEIO", "CENTRO CUSTOS RATEIO",
+            "CENTRO CUSTOS RATEADO", "CC RATEIO", "CC RATEADO",
+        ]
+    )
+
+    text_columns = [
+        "EMPRESA", "GRUPO", "SUBGRUPO", "PAI", "Categoria",
+        "CENTRO DE CUSTOS", "Codigo-Nome do Fornecedor",
+    ]
+    if rateio_col:
+        text_columns.append(rateio_col)
+    for col in text_columns:
         if col in custos.columns:
             custos[col] = custos[col].fillna("Não informado").astype(str).str.strip()
     custos["_EMPRESA_N"] = custos["EMPRESA"].map(norm)
@@ -1026,10 +1096,12 @@ def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
 
     # O rateio é preservado em uma base separada e exclusivamente informativa.
     # Ele nunca substitui o Centro de Custos direto nos cálculos de resultado.
-    if "CENTRO DE CUSTOS RATEAO" in custos.columns:
-        custos["_CC_RATEIO_N"] = custos["CENTRO DE CUSTOS RATEAO"].map(norm)
-        custos["_LINHA_RATEIO"] = custos["CENTRO DE CUSTOS RATEAO"].map(rateio_line_key)
+    if rateio_col:
+        custos["_CC_RATEIO_ORIGINAL"] = custos[rateio_col]
+        custos["_CC_RATEIO_N"] = custos[rateio_col].map(norm)
+        custos["_LINHA_RATEIO"] = custos[rateio_col].map(rateio_line_key)
     else:
+        custos["_CC_RATEIO_ORIGINAL"] = "Não informado"
         custos["_CC_RATEIO_N"] = ""
         custos["_LINHA_RATEIO"] = "NAO CLASSIFICADA"
     rateio = custos[
@@ -1037,9 +1109,17 @@ def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
         custos["_LINHA_RATEIO"].isin(LINES) &
         (~custos["_CC_N"].isin(LINES))
     ].copy()
+    rateio_meta = {
+        "column": rateio_col or "Não localizada",
+        "rows": int(len(rateio)),
+        "total": float(rateio["_VALOR"].sum()) if not rateio.empty else 0.0,
+        "unclassified_rows": int((custos["_LINHA_RATEIO"] == "NAO CLASSIFICADA").sum()),
+    }
 
     # Regra de gestão: toda visão departamental e todo resultado usam exclusivamente CENTRO DE CUSTOS.
-    custos = custos.drop(columns=["CENTRO DE CUSTOS RATEAO", "_CC_RATEIO_N", "_LINHA_RATEIO"], errors="ignore")
+    custos = custos.drop(
+        columns=[rateio_col] if rateio_col else [], errors="ignore"
+    ).drop(columns=["_CC_RATEIO_ORIGINAL", "_CC_RATEIO_N", "_LINHA_RATEIO"], errors="ignore")
     custos["_LINHA_DIRETA"] = custos["_CC_N"].where(custos["_CC_N"].isin(LINES), "NAO CLASSIFICADA")
     custos = custos[custos["_EMPRESA_N"].isin(["DESPESAS", "RECEITA"])].copy()
 
@@ -1053,7 +1133,11 @@ def load_rev(file_bytes: bytes) -> dict[str, pd.DataFrame | dict[str, str]]:
     receb["_REALIZADO"] = to_number(receb[require_col(receb, ["Recebimento Realizado"], "Performance Recebimento")])
     receb = receb[receb["_MES"].notna()].copy()
 
-    return {"receitas": receitas, "despesas": despesas, "custos": custos, "rateio": rateio, "caixa": caixa, "recebimento": receb, "sheet_states": states}
+    return {
+        "receitas": receitas, "despesas": despesas, "custos": custos,
+        "rateio": rateio, "rateio_meta": rateio_meta, "caixa": caixa,
+        "recebimento": receb, "sheet_states": states,
+    }
 
 
 def correct_microtech_receipts_in_vendas(
@@ -1480,19 +1564,93 @@ def period_filter(df: pd.DataFrame, start: pd.Period, end: pd.Period) -> pd.Data
 
 
 def billing_by_line(fat: pd.DataFrame, line: str) -> pd.DataFrame:
-    """Filtra faturamento diretamente pela coluna GERENTE da BASE BI.
+    """Filtra pela classificação canônica criada uma única vez na BASE BI.
 
-    A classificação interna da linha permanece apenas como contingência quando a
-    base não trouxer gerente. Para Ronaldo/Endoscopia, por exemplo, o critério
-    oficial passa a ser GERENTE = RONALDO.
+    Gerentes oficiais continuam soberanos (Celso, Renato, Amauri e Ronaldo).
+    Registros de gerente vazio ou não mapeado usam o segmento/produto e deixam de
+    desaparecer da soma das linhas. Assim, consolidado e linhas são reconciliáveis.
     """
     if line == "CONSOLIDADO":
         return fat.copy()
-    manager = LINE_MANAGER_MAP.get(line, "")
-    if manager and "GERENTE" in fat.columns:
-        manager_key = fat["GERENTE"].map(norm)
-        return fat[manager_key == manager].copy()
     return fat[fat["_LINHA"] == line].copy()
+
+
+def billing_reconciliation(
+    fat: pd.DataFrame, start: pd.Period, end: pd.Period,
+) -> tuple[dict[str, float | int], pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Concilia faturamento consolidado, linhas, gerentes e meses para auditoria."""
+    period = period_filter(fat, start, end).copy()
+    total = float(period["_VALOR"].sum())
+
+    line_rows = []
+    for line in LINES:
+        part = period[period["_LINHA"] == line].copy()
+        note_col = optional_col(part, ["Nota Fiscal", "NOTA FISCAL", "NF"])
+        line_rows.append({
+            "Linha": line_label(line),
+            "Código": line,
+            "Gerente oficial": LINE_MANAGER_MAP.get(line, ""),
+            "Faturamento": float(part["_VALOR"].sum()),
+            "Linhas da base": int(len(part)),
+            "Notas fiscais": int(part[note_col].nunique()) if note_col and not part.empty else 0,
+            "Via contingência": float(part.loc[part["_CRITERIO_LINHA"] != "Gerente oficial", "_VALOR"].sum()) if "_CRITERIO_LINHA" in part.columns else 0.0,
+        })
+    by_line = pd.DataFrame(line_rows)
+    sum_lines = float(by_line["Faturamento"].sum())
+    unclassified = period[~period["_LINHA"].isin(LINES)].copy()
+
+    manager_col = optional_col(period, ["GERENTE"])
+    if manager_col:
+        by_manager = (
+            period.assign(Gerente=period[manager_col].fillna("Não informado").astype(str).str.strip())
+            .groupby("Gerente", as_index=False)
+            .agg(Faturamento=("_VALOR", "sum"), Linhas=("_VALOR", "size"))
+            .sort_values("Faturamento", ascending=False)
+        )
+    else:
+        by_manager = pd.DataFrame(columns=["Gerente", "Faturamento", "Linhas"])
+
+    monthly_total = period.groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_VALOR": "Consolidado"})
+    monthly_line = period[period["_LINHA"].isin(LINES)].groupby("_MES", as_index=False)["_VALOR"].sum().rename(columns={"_VALOR": "Soma das linhas"})
+    monthly = monthly_total.merge(monthly_line, on="_MES", how="outer").fillna(0)
+    monthly["Diferença"] = monthly["Consolidado"] - monthly["Soma das linhas"]
+    monthly["Mês"] = monthly["_MES"].map(month_label)
+    monthly = monthly[["Mês", "Consolidado", "Soma das linhas", "Diferença"]]
+
+    summary = {
+        "total": total, "sum_lines": sum_lines, "difference": total - sum_lines,
+        "rows": int(len(period)), "unclassified_rows": int(len(unclassified)),
+        "unclassified_value": float(unclassified["_VALOR"].sum()) if not unclassified.empty else 0.0,
+        "fallback_value": float(period.loc[period.get("_CRITERIO_LINHA", "") != "Gerente oficial", "_VALOR"].sum()) if "_CRITERIO_LINHA" in period.columns else 0.0,
+    }
+    return summary, by_line, by_manager, monthly
+
+
+def financial_crosscheck(
+    receitas: pd.DataFrame, despesas: pd.DataFrame, custos: pd.DataFrame,
+    start: pd.Period, end: pd.Period,
+) -> pd.DataFrame:
+    """Compara os resumos financeiros com a aba Centro de Custos no mesmo período."""
+    rec = period_filter(receitas, start, end)
+    exp = period_filter(despesas, start, end)
+    cc = period_filter(custos, start, end)
+
+    resumo_rec = float(rec.loc[~rec["_NAO_OPERACIONAL"], "_VALOR"].sum())
+    cc_rec_all = float(cc.loc[(cc["_EMPRESA_N"] == "RECEITA") & (cc["_GRUPO_N"] == "RECEITAS OPERACIONAIS"), "_VALOR"].sum())
+    resumo_exp = float(exp.loc[exp["_GRUPO_N"] == "SAIDAS OPERACIONAIS", "_VALOR"].sum())
+    cc_exp_all = float(cc.loc[(cc["_EMPRESA_N"] == "DESPESAS") & (cc["_GRUPO_N"] == "SAIDAS OPERACIONAIS"), "_VALOR"].sum())
+
+    cc_rec_direct = float(cc.loc[
+        (cc["_EMPRESA_N"] == "RECEITA") & (cc["_GRUPO_N"] == "RECEITAS OPERACIONAIS") & cc["_LINHA_DIRETA"].isin(LINES), "_VALOR"
+    ].sum())
+    cc_exp_direct = float(cc.loc[
+        (cc["_EMPRESA_N"] == "DESPESAS") & (cc["_GRUPO_N"] == "SAIDAS OPERACIONAIS") & cc["_LINHA_DIRETA"].isin(LINES), "_VALOR"
+    ].sum())
+
+    return pd.DataFrame([
+        {"Indicador": "Receitas operacionais", "Resumo financeiro": resumo_rec, "Centro de Custos": cc_rec_all, "Diferença": resumo_rec - cc_rec_all, "Direto nas quatro linhas": cc_rec_direct, "Geral / não classificado": cc_rec_all - cc_rec_direct},
+        {"Indicador": "Saídas operacionais", "Resumo financeiro": resumo_exp, "Centro de Custos": cc_exp_all, "Diferença": resumo_exp - cc_exp_all, "Direto nas quatro linhas": cc_exp_direct, "Geral / não classificado": cc_exp_all - cc_exp_direct},
+    ])
 
 
 def company_cash_monthly(
@@ -2814,6 +2972,8 @@ try:
     with st.spinner("Organizando visão de caixa e linhas de negócio..."):
         base = load_base_bi(base_bytes)
         rev = load_rev(rev_bytes)
+        billing_audit = base.get("billing_audit", {})
+        rateio_meta = rev.get("rateio_meta", {})
 
         # O painel é fechado exclusivamente no ano-base de 2026.
         fat = filter_analysis_year(base["faturamento"])
@@ -2860,6 +3020,7 @@ with st.sidebar:
     pages = ["Dashboard", "Desempenho & metas", "Recebimentos & inadimplência", "Clientes", "Produtos", "Centro de custos", "Relatório para impressão"]
     if is_director:
         pages.insert(1, "Linhas de negócio")
+        pages.insert(-1, "Validação dos dados")
     if "nav_page" not in st.session_state or st.session_state.get("nav_page") not in pages:
         st.session_state["nav_page"] = pages[0]
     if st.button("🖨️ Abrir impressão visual", width="stretch", key="open_visual_print"):
@@ -3662,7 +3823,111 @@ elif page == "Produtos":
                 )
 
 # =========================================================
-# PREÇOS E RENTABILIDADE ESTIMADA
+# VALIDAÇÃO DOS DADOS — SOMENTE DIRETORIA
+# =========================================================
+elif page == "Validação dos dados" and is_director:
+    section_header("Validação dos dados", "Conciliação técnica", "Faturamento, linhas, datas e rateio sem alterar os indicadores")
+
+    validation, validation_lines, validation_managers, validation_monthly = billing_reconciliation(
+        fat, start_month, end_month
+    )
+    tolerance = 0.01
+    reconciled = abs(float(validation["difference"])) <= tolerance
+
+    a1, a2, a3, a4 = st.columns(4)
+    with a1: card("Faturamento consolidado", brl(validation["total"]), "Soma de VALOR BRUTO no período", BLUE)
+    with a2: card("Soma das quatro linhas", brl(validation["sum_lines"]), "Classificação canônica por gerente e contingência", NAVY)
+    with a3: card("Diferença da conciliação", brl(validation["difference"]), "Deve permanecer em zero", BLUE if reconciled else RED)
+    with a4: card("Faturamento por contingência", brl(validation["fallback_value"]), "Gerente vazio ou fora do mapa oficial", CYAN)
+
+    if reconciled:
+        st.success("Faturamento consolidado conciliado integralmente com Microtech, Locação, Vendas e Endoscopia.")
+    else:
+        st.error(
+            f"Há {brl(validation['difference'])} sem conciliação e "
+            f"{validation['unclassified_rows']} linha(s) não classificada(s)."
+        )
+
+    v1, v2 = st.columns([1.15, 1])
+    with v1:
+        section_header("Faturamento por linha", badge="2026")
+        view = validation_lines.copy()
+        for col in ["Faturamento", "Via contingência"]:
+            view[col] = view[col].map(brl)
+        clean_table(view.drop(columns=["Código"]), height=285)
+    with v2:
+        section_header("Faturamento por gerente informado", badge="BASE BI")
+        manager_view = validation_managers.copy()
+        if not manager_view.empty:
+            manager_view["Faturamento"] = manager_view["Faturamento"].map(brl)
+            clean_table(manager_view, height=285)
+        else:
+            st.info("A BASE BI não possui coluna de gerente reconhecida.")
+
+    section_header("Conciliação mensal", badge=period_text)
+    month_view = validation_monthly.copy()
+    for col in ["Consolidado", "Soma das linhas", "Diferença"]:
+        month_view[col] = month_view[col].map(brl)
+    clean_table(month_view, height=300)
+
+    section_header("Cruzamento financeiro da REV2026", badge=period_text)
+    financial_validation = financial_crosscheck(receitas, despesas, custos, start_month, end_month)
+    financial_view = financial_validation.copy()
+    for col in ["Resumo financeiro", "Centro de Custos", "Diferença", "Direto nas quatro linhas", "Geral / não classificado"]:
+        financial_view[col] = financial_view[col].map(brl)
+    clean_table(financial_view, height=210)
+    st.caption(
+        "A diferença entre os resumos e o Centro de Custos é exibida para controle da origem. "
+        "Ela não é compensada automaticamente pelo app. Despesas gerais ficam fora do resultado direto das linhas "
+        "e aparecem separadamente no informativo de rateio."
+    )
+
+    m1, m2, m3 = st.columns(3)
+    with m1: card("Cobertura dos recebimentos", pct(float(receipt_match_stats.get("coverage_value", 0))), "Percentual do valor operacional ligado com segurança à BASE BI", BLUE)
+    with m2: card("Recebimentos em fallback", brl(float(receipt_match_stats.get("fallback_value", 0))), "Classificados por tipo quando o cliente não foi localizado", CYAN)
+    with m3: card("Ajustes Microtech", brl(float(cc_microtech_stats.get("value", 0))), f"{int(cc_microtech_stats.get('count', 0))} recebimento(s) comprovado(s) realocado(s)", NAVY)
+
+    section_header("Integridade da BASE BI", badge=base_name)
+    b1, b2, b3, b4 = st.columns(4)
+    with b1: card("Linhas de 2026", f"{int(billing_audit.get('rows_2026', len(fat))):,}".replace(",", "."), "Registros com data válida em 2026", NAVY)
+    with b2: card("Linhas sem mês", f"{int(billing_audit.get('rows_without_month', 0)):,}".replace(",", "."), "Não entram nos filtros mensais", RED if billing_audit.get('rows_without_month', 0) else BLUE)
+    with b3: card("Linhas com valor zero", f"{int(billing_audit.get('zero_value_rows_2026', 0)):,}".replace(",", "."), "Permanecem na base, mas não alteram o total", CYAN)
+    with b4: card("Linhas sem nota fiscal", f"{int(billing_audit.get('missing_note_rows_2026', 0)):,}".replace(",", "."), "Podem exigir conferência na origem", CYAN)
+
+    st.caption(
+        f"Coluna de data: {billing_audit.get('date_column', 'não identificada')} · "
+        f"Coluna de faturamento: {billing_audit.get('value_column', 'não identificada')} · "
+        "o painel soma VALOR BRUTO por DT Emissão e considera somente 2026. "
+        f"Valores negativos: {int(billing_audit.get('negative_value_rows_2026', 0))} linha(s), "
+        f"total de {brl(float(billing_audit.get('negative_value_2026', 0)))}. "
+        "Linhas comerciais idênticas não são excluídas automaticamente, pois podem representar unidades distintas em locação."
+    )
+
+    section_header("Validação do Centro de Custos Rateado", badge=rev_name)
+    r1, r2, r3 = st.columns(3)
+    with r1: card("Coluna reconhecida", str(rateio_meta.get("column", "Não localizada")), "Nome identificado na REV2026", NAVY)
+    with r2: card("Lançamentos gerais rateados", f"{int(rateio_meta.get('rows', len(rateio))):,}".replace(",", "."), "Despesas gerais distribuídas às quatro linhas", CYAN)
+    with r3: card("Valor geral distribuído", brl(float(rateio_meta.get("total", rateio["_VALOR"].sum() if not rateio.empty else 0))), "Indicador informativo; não altera resultado direto", BLUE)
+
+    rateio_validation = period_filter(rateio, start_month, end_month) if isinstance(rateio, pd.DataFrame) and not rateio.empty else pd.DataFrame()
+    if rateio_validation.empty:
+        st.warning(
+            "Nenhum rateio foi reconhecido no período. Confira na REV2026 se a coluna possui uma das identificações "
+            "Centro de Custos Rateado, Centro de Custos Rateio ou Centro de Custos Rateao."
+        )
+    else:
+        rateio_table = (
+            rateio_validation.groupby("_LINHA_RATEIO", as_index=False)["_VALOR"].sum()
+            .rename(columns={"_LINHA_RATEIO": "Código", "_VALOR": "Valor"})
+        )
+        rateio_table["Linha"] = rateio_table["Código"].map(line_label)
+        rateio_table = rateio_table[["Linha", "Valor"]].sort_values("Valor", ascending=False)
+        rateio_view = rateio_table.copy()
+        rateio_view["Valor"] = rateio_view["Valor"].map(brl)
+        clean_table(rateio_view, height=240)
+
+# =========================================================
+# CENTRO DE CUSTOS
 # =========================================================
 elif page == "Centro de custos":
     section_header("Centro de custos", badge=scope_text)
